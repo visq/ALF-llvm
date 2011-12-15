@@ -1,0 +1,30 @@
+#!/bin/bash
+
+TOTAL=0
+ERROR=0
+rm -f "error.log"
+if [ -z $1 ] ; then
+    TESTS="*.test"
+else
+    TESTS="$@"
+fi
+for f in $TESTS ; do
+    TOTAL=$((TOTAL+1))
+    M="${f/.test/}"
+    rm -f "${M}.log"
+    bash "${M}.test"
+    if [ "$?" -eq 0 ]  ; then
+        echo "${M} ok"
+    else
+        ERROR=$((ERROR+1))
+        echo "*** ${M} ***" >> error.log
+        cat "${M}.log" >> error.log
+    fi
+done
+echo "${TOTAL} tests executed"
+echo "${ERROR:-0} tests failed"
+echo "See error.log for all error reports"
+if [ "${ERROR}" -ne 0 ] ; then
+    echo "*** Unexpected failures"
+    exit 1
+fi

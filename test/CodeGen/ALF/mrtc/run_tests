@@ -1,0 +1,93 @@
+#!/bin/bash
+
+# Configuration ---
+
+IGNORE_VOLATILES=${IGNORE_VOLATILES:-no}
+TIMEOUT=${TIMEOUT:-360}
+LLVM_FRONTEND_CFLAGS=${LLVM_FRONTEND_CFLAGS:-} # -O1
+ALF_STANDALONE=${ALF_STANDALONE:-yes}
+
+EXPECTED_FAILURES=1
+EXPECTED_TOTAL=35
+
+# --- End Configuration
+# Influential variables
+#
+# LLVM_FRONTEND_CFLAGS  ()     [-O1]
+# LLVM_ALF_FLAGS        ()     [-alf-ignore-volatiles, -alf-undefined-function-stubs]
+
+LLVM_FRONTEND=clang
+#export LLVM_OPT_FLAGS="-mem2reg -instcombine -instsimplify -instnamer"
+if [ "${IGNORE_VOLATILES}" == "yes" ] ; then
+    echo "*** Attention: ignoring volatiles (potentially unsound) ***"
+    LLVM_ALF_FLAGS="-alf-ignore-volatiles"
+    AE_FLAGS="css" # single path when volatiles are ignored
+else
+    AE_FLAGS=""
+fi
+
+# Either use the standalone mode or link with common.alf
+if [ "${ALF_STANDALONE}" == "yes" ] ; then
+    DOMAIN_FLAGS="floats=est"
+    LLVM_ALF_FLAGS="-alf-standalone ${LLVM_ALF_FLAGS}"
+else
+    ALF_LIBS=",../lib/common.alf,../lib/libc.alf"
+fi
+
+# export configuration
+export LLVM_FRONTEND
+export LLVM_FRONTEND_CFLAGS
+export TIMEOUT
+export LLVM_ALF_FLAGS
+export ALF_LIBS
+export AE_FLAGS
+export DOMAIN_FLAGS
+
+TOTAL=0
+ERROR=0
+BENCHMARKS="*.c"
+rm -f "error.log"
+if [ ! -z $1 ] ; then
+    BENCHMARKS="$@"
+fi
+for f in ${BENCHMARKS} ; do
+    TOTAL=$((TOTAL+1))
+    export M="${f/.c/}"
+    rm -f "${M}.alf" "${M}.log"
+    make -f ../Makefile "${M}.alf" >>"${M}.log" 2>&1
+    BUILD_SUCCESS=$?
+    if [ ${BUILD_SUCCESS} -eq 0 ] ; then
+        if [ -e "$M.test" ] ; then
+            bash $M.test
+        else
+            bash mrtc.test
+        fi
+    else
+        echo "*** ${M} failed to build: see ${M}.log" >&2
+    fi
+    if [ "$?" -eq 0  -a "${BUILD_SUCCESS}" -eq 0  ]  ; then
+        echo "${M} ok"
+    else
+        ERROR=$((ERROR+1))
+        echo "*** ${M} ***" >> error.log
+        cat "${M}.log" >> error.log
+    fi
+done
+echo "Comparing against [1] clang-2.9 -O0 + otap-llvm HEAD + sweet (Nov 14 2011)"
+echo
+echo "${TOTAL} tests executed (expected: ${EXPECTED_TOTAL})"
+echo "${ERROR:-0} tests failed (expected: ${EXPECTED_FAILURES} [1])"
+echo "See error.log for all error reports"
+if [ "${TOTAL}" -ne "${EXPECTED_TOTAL}" ] ; then
+    echo "*** Unexpected number of tests"
+    exit 1
+fi
+if [ "${ERROR}" -ne ${EXPECTED_FAILURES}  ] ; then
+    echo "*** Unexpected failures"
+    exit 1
+fi
+
+
+if [ ! "${ERROR}" -eq ${EXPECTED_FAILURES}  ] ; then
+    exit 1
+fi

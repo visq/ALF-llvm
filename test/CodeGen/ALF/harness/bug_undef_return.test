@@ -1,0 +1,3 @@
+M=bug_undef_return
+source libtest
+sweet_css || die "sweet single-path execution failure (check $M.log)"

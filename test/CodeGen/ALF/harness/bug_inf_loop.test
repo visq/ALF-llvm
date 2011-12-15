@@ -1,0 +1,3 @@
+M=bug_inf_loop
+source libtest
+sweet_check || die "sweet syntax check failed (see $M.log)"

@@ -1,0 +1,57 @@
+function die()
+{
+    echo "*** ${M} FAILED (${1}) - see ${M}.log" 1>&2
+#    echo "" >&2
+#    echo ">>> tail ${M}.log" >&2
+#    tail ${M}.log >&2
+    exit 1
+}
+
+function log_timeout()
+{
+    if [ $1 -eq 124 ] ; then
+        echo "Timeout after ${TIMEOUT:-10} seconds" >>$M.log 2>&1
+    fi
+    return ${1}
+}
+
+# Influential Options
+# M        ... name of the module analyzed
+# ENTRY    ... name of entry function
+# MERGE    ... merging strategy
+# AE_FLAGS ... additional flags for abstract execution
+# DOMAIN_FLAGS ... additional flags for specifing the domain
+# TIMEOUT  ... timeout
+function sweet_ae()
+{
+    if [ "${MERGE}" == NONE ] ; then
+        die "Merging strategy NONE not supported"
+    fi
+    if [ ! -e ${M}.alf ] ; then
+        die "$M.alf does not exist"
+    fi
+    (set -x; timeout ${TIMEOUT:-10} sweet -i=${M}.alf${ALF_LIBS} func=${ENTRY:-main} \
+        -do ${DOMAIN_FLAGS} -ae ffg=ub ${AE_FLAGS} vola=t merge=${MERGE:-all} \
+        debug=trace -f lang=ff o=${M}.ff) >>$M.log 2>&1
+    log_timeout $?
+}
+
+function sweet_css()
+{
+    AE_FLAGS="css ${AE_FLAGS}" sweet_ae
+}
+
+function sweet_check()
+{
+    if [ ! -e ${M}.alf ] ; then
+        die "$M.alf does not exist"
+    fi
+    sweet -i=${M}.alf func=main -c >>$M.log 2>&1 
+}
+
+
+function check_ret_val()
+{
+    RESULT=$(tail -n 1 debug_msgs.txt)
+    [[ "${RESULT}" =~ "${1}" ]]
+}

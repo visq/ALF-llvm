@@ -1,0 +1,7 @@
+make bug277.alf
+M=bug277
+DOMAIN_FLAGS="floats=est"
+ALF_LIBS=",../libs/common.alf,../libs/libc.alf rde"
+source ../libtest
+sweet_css || die "sweet single-path execution failure/timeout"
+check_ret_val "u[0,0]" || die "wrong result: 0 /= ${RESULT}"

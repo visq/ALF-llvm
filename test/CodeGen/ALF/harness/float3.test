@@ -1,0 +1,4 @@
+M=float3
+source libtest
+sweet_ae || die "sweet single-path execution failure/timeout"
+check_ret_val "u[0,4]" || die "wrong result: [0,4] /= ${RESULT}"

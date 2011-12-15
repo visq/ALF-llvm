@@ -1,0 +1,7 @@
+M=nondet2a
+MERGE=fr
+
+source libtest
+
+sweet_ae || die "sweet single-path execution failure/timeout"
+check_ret_val "u[0,0]" || die "wrong result: 0 /= ${RESULT}"

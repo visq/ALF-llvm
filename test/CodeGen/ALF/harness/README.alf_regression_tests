@@ -1,0 +1,9 @@
+Regression tests for SWEET
+--------------------------
+$ bash run_alf_tests
+<test1> ok
+.........
+<testN> ok
+N tests executed
+0 tests failed
+See error.log for all error reports

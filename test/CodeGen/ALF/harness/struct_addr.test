@@ -1,0 +1,4 @@
+M=struct_addr
+ENTRY=f
+source libtest
+sweet_ae || die "sweet AE execution failure/timeout"

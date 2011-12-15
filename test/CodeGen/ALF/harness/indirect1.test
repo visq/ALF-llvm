@@ -1,0 +1,5 @@
+M=indirect1
+EXPECT="u[0,0]"
+source libtest
+sweet_ae || die "sweet abstract execution execution failure/timeout"
+check_ret_val "${EXPECT}" || die "wrong result: ${EXPECT} /= ${RESULT}"

@@ -1,0 +1,112 @@
+{ alf
+ { macro_defs }
+ { least_addr_unit 8 }
+ little_endian
+ { exports
+  { frefs { fref 32 "g" } { fref 32 "d" } }
+  { lrefs { lref 32 "m" } }
+ }
+ { imports
+  { frefs }
+  { lrefs }
+ }
+ { decls
+  { alloc 32 "$null" 32 }
+  { alloc 32 "$mem" inf }
+  { alloc 32 "g" 32 }
+  { alloc 32 "d" 32 }
+ }
+ { inits
+  { init { ref "g" { dec_unsigned 32 0 } } { addr 32 { fref 32 "$null" } { dec_unsigned 32 0 } } }
+  { init { ref "d" { dec_unsigned 32 0 } } { dec_unsigned 16 0 } }
+  { init { ref "d" { dec_unsigned 32 2 } } { dec_unsigned 16 0 } }
+ }
+ { funcs
+ /* -------------------- FUNCTION m -------------------- */ 
+  { func
+   { label 32 { lref 32 "m" } { dec_unsigned 32 0 } }
+   { arg_decls }
+   { scope
+    { decls
+     { alloc 32 "%tmp" 32 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%i.0" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%tmp2" 16 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%tmp7" 32 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "m::bb" } { dec_unsigned 32 0 } }
+      /* LLVM expression: m::bb::  %tmp = load i16** @g, align 4, !dbg !13 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with
+       { load 32 { addr 32 { fref 32 "g" } { dec_unsigned 32 0 } } }
+      }
+      /* LLVM statement: m::bb::  store i16 1, i16* %tmp, align 2, !dbg !13 */
+      { store { load 32 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } with { dec_unsigned 16 1 } }
+      /* LLVM statement: m::bb::  br label %bb1, !dbg !18 */
+      /* Set PHI node:   %i.0 = phi i32 [ 0, %bb ], [ %tmp7, %bb6 ] to i32 0 */
+      { store { addr 32 { fref 32 "%i.0" } { dec_unsigned 32 0 } } with { dec_unsigned 32 0 } }
+      { jump
+       { label 32 { lref 32 "m::bb1" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK bb1 ---------- */
+
+     { label 32 { lref 32 "m::bb1" } { dec_unsigned 32 0 } }
+      /* LLVM expression: m::bb1::  %tmp2 = load i16* getelementptr inbounds ([2 x i16]* @d, i32 0, i32 0), align 2, !dbg !18 */
+      { store { addr 32 { fref 32 "%tmp2" } { dec_unsigned 32 0 } } with
+       { load 16 { addr 32 { fref 32 "d" } { dec_unsigned 32 0 } } }
+      }
+      /* LLVM statement: m::bb1::  br i1 %tmp4, label %bb5, label %bb8, !dbg !18 */
+      { switch
+       { s_lt 32 { load 32 { addr 32 { fref 32 "%i.0" } { dec_unsigned 32 0 } } }
+        { s_ext 16 32 { load 16 { addr 32 { fref 32 "%tmp2" } { dec_unsigned 32 0 } } } }
+       }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "m::bb5" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "m::bb8" } { dec_unsigned 32 0 } }
+       }
+      }
+
+     /* --------- BASIC BLOCK bb5 ---------- */
+
+     { label 32 { lref 32 "m::bb5" } { dec_unsigned 32 0 } }
+      /* LLVM statement: m::bb5::  br label %bb6, !dbg !18 */
+      { jump
+       { label 32 { lref 32 "m::bb6" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK bb6 ---------- */
+
+     { label 32 { lref 32 "m::bb6" } { dec_unsigned 32 0 } }
+      /* LLVM expression: m::bb6::  %tmp7 = add nsw i32 %i.0, 1, !dbg !18 */
+      { store { addr 32 { fref 32 "%tmp7" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%i.0" } { dec_unsigned 32 0 } } } { dec_unsigned 32 1 } { dec_unsigned 1 0 } }
+      }
+      /* LLVM statement: m::bb6::  br label %bb1, !dbg !18 */
+      /* Set PHI node:   %i.0 = phi i32 [ 0, %bb ], [ %tmp7, %bb6 ] to   %tmp7 = add nsw i32 %i.0, 1, !dbg !18 */
+      { store { addr 32 { fref 32 "%i.0" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%tmp7" } { dec_unsigned 32 0 } } } }
+      { jump
+       { label 32 { lref 32 "m::bb1" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK bb8 ---------- */
+
+     { label 32 { lref 32 "m::bb8" } { dec_unsigned 32 0 } }
+      /* LLVM statement: m::bb8::  ret void, !dbg !19 */
+      { return }
+    }
+   }
+  }
+ }
+}
