@@ -1,0 +1,52 @@
+---
+title: Open Timing Analysis Platform Project: LLVM Extensions
+---
+
+# OTAP - LLVM
+
+OTAP - LLVM collects extension to the LLVM compiler framework to enable
+and improve WCET analysis. Currently, it includes a backend for the ALF
+language used in the SWEET flow analysis tool.
+
+## Components
+
+* LLVM [ALF](ALF: http://www.mrtc.mdh.se/projects/all-times/documents/ALF/ALF-spec-v1_30.pdf) Backend
+
+    For more information on the ALF backend, see [LLVM ALF Backend](llvm-alf.html).
+
+* LLVM OTAP Extensions
+
+    * LLVM Trace Generator (Prototype)
+    Generate traces while interpreting via lli
+
+    * Emit Mappings (Prototype)
+    Print the mappings from MC basic blocks to IR basic blocks
+
+    * Marker Variables (Planned)
+    Pseudo-Variables for flow fact markers preserved during optimizations
+  
+    * Variable Mappigns (Planned)
+    Patch to connect MC and IR registers (value analysis)
+
+  
+* Future Work
+
+    * Value Analysis
+    Add support for [range analysis](http://groups.google.com/group/llvm-dev/browse_thread/thread/e7017573168647)
+
+    * Precise Alias Analysis
+    Include precise alias analysis patches (update Chris Lattner's work)
+
+    * Bounded Model Checking
+    Connecting to a low-level bounded model checker (eg. [LLBMC](http://baldur.iti.uka.de/llbmc/))
+  
+    * Symbolic Loop Bound Analysis
+    Connecting to a loop bound analysis tools (Loopus?)
+
+
+## Obtaining OTAP-LLVM
+
+    git clone git://forge.vmars.tuwien.ac.at/git/otap-llvm.git
+
+
+
