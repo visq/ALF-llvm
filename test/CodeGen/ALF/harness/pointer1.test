@@ -1,0 +1,4 @@
+M=pointer1
+source libtest
+sweet_css || die "sweet single-path execution failure/timeout"
+check_ret_val "u[0,0]" || die "wrong result: 0 /= ${RESULT}"

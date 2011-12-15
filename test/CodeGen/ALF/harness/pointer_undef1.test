@@ -1,0 +1,4 @@
+M=pointer_undef1
+source libtest
+sweet_css && die "sweet single-path execution succeeded (expect failure)"
+true

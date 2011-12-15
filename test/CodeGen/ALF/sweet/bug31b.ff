@@ -1,0 +1,2 @@
+: m : [] : m::bb <= 1 ;   %% uhss - Upper header bounds in scope context.
+: (m, m::bb3) : [] : m::bb3 <= 2 ;   %% uhss - Upper header bounds in scope context.

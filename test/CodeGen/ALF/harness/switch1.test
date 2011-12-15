@@ -1,0 +1,8 @@
+M=switch1
+MERGE=fr
+TIMEOUT=60
+EXPECT="u[0,52]"
+source libtest
+sweet_ae || die "sweet abstract execution failure/timeout"
+check_ret_val $EXPECT || die "wrong result: ${EXPECT} /= ${RESULT}"
+

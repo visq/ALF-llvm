@@ -1,0 +1,15 @@
+#!/bin/bash
+if [ -z "${M}" ] ; then
+   echo "M not set. Exit" >&2
+   exit 1
+fi
+if [ ! -e "${M}.alf" ] ; then
+   echo "M.alf does not exist. Rebuilding." >&2
+   make -f ../Makefile ${M}.alf || exit 1
+fi
+source ../libtest
+if [ ! -z "${2}" ] ; then
+	export ENTRY="${2}"
+fi
+sweet_ae || die "sweet abstract execution failure/timeout"
+# check_ret_val "u[0,0]" || die "wrong result: 0 /= ${RESULT}"

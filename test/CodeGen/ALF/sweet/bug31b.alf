@@ -1,0 +1,127 @@
+{ alf
+ { macro_defs }
+ { least_addr_unit 8 }
+ little_endian
+ { exports
+  { frefs { fref 32 "x" } { fref 32 "d" } { fref 32 "g" } }
+  { lrefs { lref 32 "m" } }
+ }
+ { imports
+  { frefs }
+  { lrefs }
+ }
+ { decls
+  { alloc 32 "$null" 32 }
+  { alloc 32 "$mem" inf }
+  { alloc 32 "x" 16 }
+  { alloc 32 "d" 32 }
+  { alloc 32 "g" 32 }
+ }
+ { inits
+  { init { ref "x" { dec_unsigned 32 0 } } { dec_unsigned 16 0 } }
+  { init { ref "d" { dec_unsigned 32 0 } } { dec_unsigned 16 0 } }
+  { init { ref "d" { dec_unsigned 32 2 } } { dec_unsigned 16 0 } }
+  { init { ref "g" { dec_unsigned 32 0 } } { addr 32 { fref 32 "$null" } { dec_unsigned 32 0 } } }
+ }
+ { funcs
+ /* -------------------- FUNCTION m -------------------- */ 
+  { func
+   { label 32 { lref 32 "m" } { dec_unsigned 32 0 } }
+   { arg_decls }
+   { scope
+    { decls
+     { alloc 32 "%tmp" 16 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%tmp2" 32 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%i.0" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%tmp4" 16 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%tmp9" 32 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "m::bb" } { dec_unsigned 32 0 } }
+      /* LLVM expression: m::bb::  %tmp = load i16* @x, align 2, !dbg !14 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with
+       { load 16 { addr 32 { fref 32 "x" } { dec_unsigned 32 0 } } }
+      }
+      /* LLVM expression: m::bb::  %tmp2 = getelementptr inbounds [2 x i16]* @d, i32 0, i32 %tmp1, !dbg !14 */
+      { store { addr 32 { fref 32 "%tmp2" } { dec_unsigned 32 0 } } with
+       { add 32 { addr 32 { fref 32 "d" } { dec_unsigned 32 0 } }
+        { select 64 0 31 { u_mul 32 32
+          { s_ext 16 32 { load 16 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+          { dec_unsigned 32 2 }
+         } }
+        { dec_unsigned 1 0 }
+       }
+      }
+      /* LLVM statement: m::bb::  store i16* %tmp2, i16** @g, align 4, !dbg !14 */
+      { store { addr 32 { fref 32 "g" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%tmp2" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: m::bb::  store i16 1, i16* %tmp2, align 2, !dbg !16 */
+      { store { load 32 { addr 32 { fref 32 "%tmp2" } { dec_unsigned 32 0 } } } with { dec_unsigned 16 1 } }
+      /* LLVM statement: m::bb::  br label %bb3, !dbg !20 */
+      /* Set PHI node:   %i.0 = phi i32 [ 0, %bb ], [ %tmp9, %bb8 ] to i32 0 */
+      { store { addr 32 { fref 32 "%i.0" } { dec_unsigned 32 0 } } with { dec_unsigned 32 0 } }
+      { jump
+       { label 32 { lref 32 "m::bb3" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK bb3 ---------- */
+
+     { label 32 { lref 32 "m::bb3" } { dec_unsigned 32 0 } }
+      /* LLVM expression: m::bb3::  %tmp4 = load i16* getelementptr inbounds ([2 x i16]* @d, i32 0, i32 0), align 2, !dbg !20 */
+      { store { addr 32 { fref 32 "%tmp4" } { dec_unsigned 32 0 } } with
+       { load 16 { addr 32 { fref 32 "d" } { dec_unsigned 32 0 } } }
+      }
+      /* LLVM statement: m::bb3::  br i1 %tmp6, label %bb7, label %bb10, !dbg !20 */
+      { switch
+       { s_lt 32 { load 32 { addr 32 { fref 32 "%i.0" } { dec_unsigned 32 0 } } }
+        { s_ext 16 32 { load 16 { addr 32 { fref 32 "%tmp4" } { dec_unsigned 32 0 } } } }
+       }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "m::bb7" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "m::bb10" } { dec_unsigned 32 0 } }
+       }
+      }
+
+     /* --------- BASIC BLOCK bb7 ---------- */
+
+     { label 32 { lref 32 "m::bb7" } { dec_unsigned 32 0 } }
+      /* LLVM statement: m::bb7::  br label %bb8, !dbg !20 */
+      { jump
+       { label 32 { lref 32 "m::bb8" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK bb8 ---------- */
+
+     { label 32 { lref 32 "m::bb8" } { dec_unsigned 32 0 } }
+      /* LLVM expression: m::bb8::  %tmp9 = add nsw i32 %i.0, 1, !dbg !20 */
+      { store { addr 32 { fref 32 "%tmp9" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%i.0" } { dec_unsigned 32 0 } } } { dec_unsigned 32 1 } { dec_unsigned 1 0 } }
+      }
+      /* LLVM statement: m::bb8::  br label %bb3, !dbg !20 */
+      /* Set PHI node:   %i.0 = phi i32 [ 0, %bb ], [ %tmp9, %bb8 ] to   %tmp9 = add nsw i32 %i.0, 1, !dbg !20 */
+      { store { addr 32 { fref 32 "%i.0" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%tmp9" } { dec_unsigned 32 0 } } } }
+      { jump
+       { label 32 { lref 32 "m::bb3" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK bb10 ---------- */
+
+     { label 32 { lref 32 "m::bb10" } { dec_unsigned 32 0 } }
+      /* LLVM statement: m::bb10::  ret void, !dbg !21 */
+      { return }
+    }
+   }
+  }
+ }
+}

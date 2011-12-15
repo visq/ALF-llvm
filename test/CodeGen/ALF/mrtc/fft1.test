@@ -1,0 +1,9 @@
+#!/bin/bash
+M=fft1
+export DOMAIN_FLAGS="floats=est"
+if [ ! -e "${M}.alf" ] ; then
+   echo "M.alf does not exist. Rebuilding." >&2
+   make -f ../Makefile ${M}.alf || exit 1
+fi
+source ../libtest
+sweet_ae || die "sweet abstract execution failure/timeout"
