@@ -1,6 +1,11 @@
 include ../Makefile
 
+all:
+
 clean: default_clean
 	rm -f *.alf *.ll
 
-.PHONY: clean distclean
+distclean: clean
+	bash clean.sh
+
+.PHONY: distclean clean distclean
