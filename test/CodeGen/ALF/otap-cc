@@ -1,0 +1,68 @@
+#!/usr/bin/env ruby
+#
+# gcc compatible driver generating files for timing analysis
+#
+# The plan is to setup all options by parsing -help from clang/gcc.
+# Currently, relies on a crude heuristic which does not work in all cases
+#
+require 'fileutils'
+
+HAVE_CROSSCOMPILER=true
+
+module Enumerable
+  def find_index(obj)
+    self.each_with_index { |v,i|
+      return i if(v==obj)
+    }
+    nil
+  end
+end
+def die(msg)
+  $stderr.puts msg
+  exit 1
+end
+
+def system_echo(*args)
+  system("echo",*args)
+  unless system(*args)
+    exit $?
+  end
+end
+def clang(*args)
+  system_echo("clang",*args)
+end
+def llc(*args)
+  system_echo("llc",*args)
+end
+def opt_inplace(file,args)
+  tmp = file + ".tmp" # XXX
+  system_echo("opt","-o",tmp,file,*args)
+  FileUtils.mv(tmp,file)
+end
+
+args = ARGV.dup
+is_assemble = args.include?('-c')
+is_compile  = args.include?('-S')
+is_preprocess = args.include?('-E')
+if ! HAVE_CROSSCOMPILER
+  args.push("-emit-llvm")
+end
+output = args.find_index("-o") ; output += 1 if output
+# If compiling, emit LLVM bitcode and ALF code
+clang(*args)
+if (is_compile || is_assemble) && ! is_preprocess 
+  if ! output
+    $stderr.puts "No emitting of TA files: '-o' option missing"
+  else
+    m = args[output].gsub(/\.\w+$/,'')
+    bitcode_file = m + (is_assemble ? '.bc' : '.ll')
+    args[output] = bitcode_file
+    args.push("-emit-llvm")
+    clang(*args)
+    opt_inplace(bitcode_file,%w{-mem2reg -instcombine -instsimplify -instnamer})
+    llc("-march=alf","-o","#{m}.alf","#{m}.bc")
+  end
+elsif ! is_preprocess
+  $stderr.puts "linking"
+  # Objdump and linker info
+end  
