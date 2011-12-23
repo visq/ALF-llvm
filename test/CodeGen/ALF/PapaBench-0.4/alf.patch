@@ -1,0 +1,194 @@
+diff -ur PapaBench-0.4-orig/avr/include/avr/interrupt.h PapaBench-0.4//avr/include/avr/interrupt.h
+--- PapaBench-0.4-orig/avr/include/avr/interrupt.h	2008-10-24 18:45:15.000000000 +0200
++++ PapaBench-0.4//avr/include/avr/interrupt.h	2011-01-26 15:05:43.000000000 +0100
+@@ -115,8 +115,8 @@
+ #define __EICR GIMSK
+ #endif
+ #if defined(GICR)
+-#define __EICR GICR
++//#define __EICR GICR
+ //printf("--EICR=GICR");//FN 5-1-06
+ #endif
+ 
+ 
+diff -ur PapaBench-0.4-orig/conf/Makefile.local PapaBench-0.4//conf/Makefile.local
+--- PapaBench-0.4-orig/conf/Makefile.local	2008-10-24 18:45:15.000000000 +0200
++++ PapaBench-0.4//conf/Makefile.local	2011-12-19 16:34:07.000000000 +0100
+@@ -6,17 +6,20 @@
+ #CONF=powerpc-elf-alone
+ #CONF=powerpc-linux-gnu
+ #CONF=arm-elf
+-CONF=arm-elf-alone
++
++CONF=arm-linux-gnueabi
++#CONF=llvm
+ 
+ # Tools
+-CC		= $(ARCH)gcc
+-LD		= $(CC) 
+-SIZE	= $(ARCH)size
+-OBJCOPY	= $(ARCH)objcopy
+-OBJDUMP = $(ARCH)objdump -d
++CC		= otap-cc
++LD		= $(ARCH)-gcc
++SIZE            = $(ARCH)-size
++OBJCOPY	        = $(ARCH)-objcopy
++OBJDUMP         = $(ARCH)-objdump -d
+ 
+ 
+ # Other configuration
+-USER_CFLAGS		=
+-USER_LDFLAGS	=
++
++USER_CFLAGS=-mfloat-abi=$(TARGET_FLOAT_ABI) -ccc-host-triple $(TARGET_HOST_TRIPLE) -mcpu=$(TARGET_CPU)
++USER_LDFLAGS=
+ 
+diff -ur PapaBench-0.4-orig/conf/Makefile.std PapaBench-0.4//conf/Makefile.std
+--- PapaBench-0.4-orig/conf/Makefile.std	2008-10-24 18:45:15.000000000 +0200
++++ PapaBench-0.4//conf/Makefile.std	2011-12-19 13:46:16.000000000 +0100
+@@ -79,7 +79,7 @@
+ ifdef PAPABENCH_SINGLE
+ CFLAGS += -DPAPABENCH_SINGLE
+ endif
+-	
++
+ 
+ LDFLAGS = \
+ 	$(ARCH_STDFLAGS) \
+@@ -90,8 +90,12 @@
+ # General rules
+ #
+ 
++ifndef PAPABENCH_NOLINK
+ all:									\
+ 	$(TARGET).elf $(TARGET).dis
++else
++all:    $($(TARGET).objs)
++endif
+ 
+ compile: $(TARGET).elf							\
+ 
+@@ -123,18 +127,18 @@
+ 	@$(UISP) $(ISP_FLAGS) --rd_fuses >$(TMPFILE)
+ 	@if (grep -ri 'Fuse Low Byte' $(TMPFILE) | cut -c24- | grep -iq $(LOW_FUSE)) && (grep -ri 'Fuse High Byte' $(TMPFILE) |cut -c24- | grep -iq $(HIGH_FUSE)) && (grep -ri 'Fuse Extended Byte' $(TMPFILE) |cut -c24- | grep -iq $(EXT_FUSE)) && (grep -ri 'Lock Bits' $(TMPFILE) |cut -c24- | grep -iq $(LOCK_FUSE)); then echo "-> Fuses are Ok"; rm $(TMPFILE); else echo "-> Wrong fuses. Type 'make wr_fuses'"; rm $(TMPFILE); exit 1; fi
+ 
+-ifdef PAPABENCH_NOLINK
+-%.elf:
+-else
++ifndef NO_LINK_STATIC_FLAG
++ADDITIONAL_LDFLAGS=-static
++endif
++
+ %.elf:
+ 	$(LD)								\
+ 	$(LOCAL_LDFLAGS)						\
+ 		$($(@:.elf=).objs)					\
+ 		-o $@							\
+ 		$(LDFLAGS)						\
+-		-static
++		$(ADDITIONAL_LDFLAGS)
+ 	$(SIZE) $@
+-endif
+ 
+ %.s: %.c
+ 	$(CC) $(CFLAGS) -S $<
+@@ -148,7 +152,6 @@
+ %.dis: %.elf
+ 	$(OBJDUMP) $< > $@
+ 
+-
+ %.install: %.hex check_arch
+ 	# stk200 needs to be erased first
+ 	$(UISP) $(UISP_FLAGS) --erase
+diff -ur PapaBench-0.4-orig/sw/airborne/autopilot/main.c PapaBench-0.4//sw/airborne/autopilot/main.c
+--- PapaBench-0.4-orig/sw/airborne/autopilot/main.c	2008-10-24 18:45:15.000000000 +0200
++++ PapaBench-0.4//sw/airborne/autopilot/main.c	2011-12-19 15:24:55.000000000 +0100
+@@ -53,7 +53,7 @@
+ static const uint16_t version = 1;
+ 
+ /**  in seconds */
+-static uint16_t cputime = 0;
++ uint16_t cputime = 0;
+ 
+ uint8_t pprz_mode = PPRZ_MODE_MANUAL;
+ uint8_t vertical_mode = VERTICAL_MODE_MANUAL;
+@@ -65,7 +65,7 @@
+ 
+ uint8_t vsupply;
+ 
+-static uint8_t  mcu1_status, mcu1_ppm_cpt;
++ uint8_t  mcu1_status, mcu1_ppm_cpt;
+ 
+ static bool_t low_battery = FALSE;
+ 
+@@ -92,8 +92,8 @@
+  * radio roll stick to get new calibration
+  * If not, the default calibration is used.
+  */
+-inline void ground_calibrate( void ) {
+-  static uint8_t calib_status = NO_CALIB;
++/* inline */ void ground_calibrate( void ) {
++   uint8_t calib_status = NO_CALIB;
+ /*#ifdef WITH_SWITCH
+   switch (calib_status) {
+   case NO_CALIB:
+diff -ur PapaBench-0.4-orig/sw/airborne/autopilot/mainloop.c PapaBench-0.4//sw/airborne/autopilot/mainloop.c
+--- PapaBench-0.4-orig/sw/airborne/autopilot/mainloop.c	2008-10-24 18:45:15.000000000 +0200
++++ PapaBench-0.4//sw/airborne/autopilot/mainloop.c	2011-12-19 14:37:58.000000000 +0100
+@@ -41,7 +41,7 @@
+ 	void fbw_init(void);
+ 	void fbw_schedule(void);
+ #endif
+-
++volatile int term;
+ int main( void ) 
+ {
+   uint8_t init_cpt;
+@@ -73,7 +73,7 @@
+   }
+ 
+   /*  enter mainloop */
+-  while( 1 ) {
++  while( ! term ) {
+     if(timer_periodic()) {
+       periodic_task();
+ #		if PAPABENCH_SINGLE
+diff -ur PapaBench-0.4-orig/sw/airborne/fly_by_wire/main.c PapaBench-0.4//sw/airborne/fly_by_wire/main.c
+--- PapaBench-0.4-orig/sw/airborne/fly_by_wire/main.c	2008-10-24 18:45:15.000000000 +0200
++++ PapaBench-0.4//sw/airborne/fly_by_wire/main.c	2011-12-19 14:17:09.000000000 +0100
+@@ -37,6 +37,10 @@
+ 
+ #include "uart.h"
+ 
++void fbw_spi_init(void);
++void fbw_adc_init(void);
++struct adc_buf;
++void fbw_adc_buf_channel(uint8_t adc_channel, struct adc_buf* s);
+ 
+ #ifndef CTL_BRD_V1_1
+ #include "adc_fbw.h"
+@@ -148,10 +152,11 @@
+ }
+ 
+ #ifndef PAPABENCH_SINGLE
++volatile int term;
+ int main( void )
+ {
+ 	fbw_init();
+-  while( 1 ) 
++  while( ! term ) 
+   {
+ 	fbw_schedule();
+     if(timer_periodic()) 
+diff -ur PapaBench-0.4-orig/sw/airborne/fly_by_wire/Makefile PapaBench-0.4//sw/airborne/fly_by_wire/Makefile
+--- PapaBench-0.4-orig/sw/airborne/fly_by_wire/Makefile	2008-10-24 18:45:15.000000000 +0200
++++ PapaBench-0.4//sw/airborne/fly_by_wire/Makefile	2011-12-16 18:09:03.000000000 +0100
+@@ -72,7 +72,7 @@
+ 
+ 
+ main.o .depend : $(VARINCLUDE)/radio.h $(VARINCLUDE)/airframe.h
+-ppm.s : $(VARINCLUDE)/radio.h
++# ppm.s : $(VARINCLUDE)/radio.h
+ 
+ clean : avr_clean
+ 
