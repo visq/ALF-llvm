@@ -1,0 +1,99 @@
+Testsuite: Papabench for ARM
+============================
+
+Source
+------
+
+Please consult
+
+    http://www.irit.fr/recherches/ARCHI/MARCH/rubrique.php3?id_rubrique=97
+
+for more information on PapaBench.
+
+Building for ARM using clang/llvm
+---------------------------------
+
+First, we edited Makefile.local, to use our custom gcc replacement script 'otap-cc'. It invokes clang (LLVM's gcc replacement script), and additionally generates ALF files for analysis.
+
+    diff PapaBench-0.4-orig/conf/Makefile.local PapaBench-0.4/conf/Makefile.local
+
+    < CC            = $(ARCH)gcc
+    < LD            = $(CC) 
+    ---
+    > CC            = otap-cc
+    > LD            = $(ARCH)-gcc
+
+The options for clang are added to the USER_CFLAGS variable.
+The target configuration (float ABI, host triple, CPU) is set in conf/$(CONF).conf.
+
+    < USER_CFLAGS   =
+    < USER_LDFLAGS  =
+    ---
+    > USER_CFLAGS   =-mfloat-abi=$(TARGET_FLOAT_ABI) -ccc-host-triple $(TARGET_HOST_TRIPLE) -mcpu=$(TARGET_CPU)
+    > USER_LDFLAGS  =
+
+
+For linking, a native ARM compiler is needed; we used the arm-linux-gnueabi package from Ubuntu.
+
+    < CONF=arm-elf-alone
+    ---
+    > CONF=arm-linux-gnueabi
+
+Here is the sample configuration for the arm-linux-gnueabi platform on a simple ARM processor:
+
+    cat PapaBench-0.4/conf/arm-linux-gnueabi.conf  
+  
+    ARCH    = arm-linux-gnueabi
+    STACK   = 0x80000000
+
+    # arch configuration
+    ARCH_CRT0=$(BASE)/sw/lib/crt0/arm-elf-crt0.c
+    ARCH_SOURCES=
+    ARCH_CFLAGS=-DSTACK=\"$(STACK)\"
+    ARCH_LDFLAGS=-nostartfiles
+
+    # clang configuration
+    TARGET_FLOAT_ABI=soft
+    TARGET_HOST_TRIPLE=arm-elf-linux
+    TARGET_CPU=arm7tdmi
+    TARGET_CC=arm-linux-gnueabi-gcc
+
+Now PapaBench can be build by invoking make. otap-cc
+will create all the necessary '.alf' files.
+
+More tips on using clang as cross-compiler can be found here:
+  
+  http://wiki.rtems.org/wiki/index.php/CLANG
+
+
+Analyzing PapaBench
+-------------------
+
+To analyze PapaBench, we needed to change the infinite loops
+in the main function from
+  
+  while(1) { ... }
+
+to
+  
+  volatile int term;
+  while(! term) { ... }
+
+This is only to workaround a restriction of SWEET, the semantic of
+the programs does not change.
+
+Additionally, we need to generate libc stubs for the target platform.
+
+    cd sw/airborne/autopilot/
+    make BASE=`pwd`/../../.. ../../lib/libc-alf.o
+        clang ...
+        llc -march=alf -o ../../lib/libc-alf.alf ../../lib/libc-alf.bc
+
+Finally, there are two shell scripts to perform the analyses:
+
+   ${BASE}/sw/airborne/autopilot/flow_analysis.sh
+
+and
+
+   ${BASE}/sw/airborne/fly_by_wire/flow_analysis.sh
+

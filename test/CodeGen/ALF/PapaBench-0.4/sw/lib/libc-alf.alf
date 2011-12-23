@@ -1,0 +1,703 @@
+{ alf
+ { macro_defs }
+ { least_addr_unit 8 }
+ little_endian
+ { exports
+  { frefs }
+  { lrefs { lref 32 "memcpy" } { lref 32 "memmove" } { lref 32 "memset" } { lref 32 "atan" } { lref 32 "cos" } { lref 32 "exp" } { lref 32 "log" } { lref 32 "sin" } { lref 32 "sqrt" } { lref 32 "frexp" } { lref 32 "frexpf" } { lref 32 "frexpl" } { lref 32 "ldexp" } { lref 32 "ldexpf" } { lref 32 "ldexpl" } }
+ }
+ { imports
+  { frefs { fref 32 "$null" } { fref 32 "$mem" } }
+  { lrefs }
+ }
+ { decls
+  { alloc 32 "$volatile_32" 32 }
+  { alloc 32 "$volatile_64" 64 }
+ }
+ { inits
+  { init { ref "$volatile_32" { dec_unsigned 32 0 } } { const_repeat { dec_unsigned 1 0 } 32 } volatile }
+  { init { ref "$volatile_64" { dec_unsigned 32 0 } } { const_repeat { dec_unsigned 1 0 } 64 } volatile }
+ }
+ { funcs
+ /* -------------------- FUNCTION memcpy -------------------- */ 
+  { func
+   { label 32 { lref 32 "memcpy" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%s1" 32 }
+    { alloc 32 "%s2" 32 }
+    { alloc 32 "%n" 32 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%r2.03" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%r1.02" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%.01" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%tmp2" 8 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%tmp4" 32 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "memcpy::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: memcpy::bb::  br i1 %tmp, label %._crit_edge, label %.lr.ph */
+      { switch
+       { eq 32 { load 32 { addr 32 { fref 32 "%n" } { dec_unsigned 32 0 } } } { dec_unsigned 32 0 } }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "memcpy::._crit_edge" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "memcpy::bb->memcpy::.lr.ph" } { dec_unsigned 32 0 } }
+       }
+      }
+      { label 32 { lref 32 "memcpy::bb->memcpy::.lr.ph" } { dec_unsigned 32 0 } }
+      /* Set PHI node:   %r2.03 = phi i8* [ %tmp1, %.lr.ph ], [ %s2, %bb ] to i8* %s2 */
+      { store { addr 32 { fref 32 "%r2.03" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%s2" } { dec_unsigned 32 0 } } } }
+      /* Set PHI node:   %r1.02 = phi i8* [ %tmp3, %.lr.ph ], [ %s1, %bb ] to i8* %s1 */
+      { store { addr 32 { fref 32 "%r1.02" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%s1" } { dec_unsigned 32 0 } } } }
+      /* Set PHI node:   %.01 = phi i32 [ %tmp4, %.lr.ph ], [ %n, %bb ] to i32 %n */
+      { store { addr 32 { fref 32 "%.01" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%n" } { dec_unsigned 32 0 } } } }
+      { jump
+       { label 32 { lref 32 "memcpy::.lr.ph" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK .lr.ph ---------- */
+
+     { label 32 { lref 32 "memcpy::.lr.ph" } { dec_unsigned 32 0 } }
+      /* LLVM expression: memcpy::.lr.ph::  %tmp2 = load i8* %r2.03, align 1, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp2" } { dec_unsigned 32 0 } } with
+       { load 8 { load 32 { addr 32 { fref 32 "%r2.03" } { dec_unsigned 32 0 } } } }
+      }
+      /* LLVM statement: memcpy::.lr.ph::  store i8 %tmp2, i8* %r1.02, align 1, !tbaa !0 */
+      { store { load 32 { addr 32 { fref 32 "%r1.02" } { dec_unsigned 32 0 } } } with { load 8 { addr 32 { fref 32 "%tmp2" } { dec_unsigned 32 0 } } } }
+      /* LLVM expression: memcpy::.lr.ph::  %tmp4 = add i32 %.01, -1 */
+      { store { addr 32 { fref 32 "%tmp4" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%.01" } { dec_unsigned 32 0 } } } { dec_unsigned 32 4294967295 } { dec_unsigned 1 0 } }
+      }
+      /* LLVM statement: memcpy::.lr.ph::  br i1 %tmp5, label %._crit_edge, label %.lr.ph */
+      { switch
+       { eq 32 { load 32 { addr 32 { fref 32 "%tmp4" } { dec_unsigned 32 0 } } } { dec_unsigned 32 0 } }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "memcpy::._crit_edge" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "memcpy::.lr.ph->memcpy::.lr.ph" } { dec_unsigned 32 0 } }
+       }
+      }
+      { label 32 { lref 32 "memcpy::.lr.ph->memcpy::.lr.ph" } { dec_unsigned 32 0 } }
+      /* Set PHI node:   %r2.03 = phi i8* [ %tmp1, %.lr.ph ], [ %s2, %bb ] to   %tmp1 = getelementptr inbounds i8* %r2.03, i32 1 */
+      { store { addr 32 { fref 32 "%r2.03" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%r2.03" } { dec_unsigned 32 0 } } } { dec_unsigned 32 1 } { dec_unsigned 1 0 } }
+      }
+      /* Set PHI node:   %r1.02 = phi i8* [ %tmp3, %.lr.ph ], [ %s1, %bb ] to   %tmp3 = getelementptr inbounds i8* %r1.02, i32 1 */
+      { store { addr 32 { fref 32 "%r1.02" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%r1.02" } { dec_unsigned 32 0 } } } { dec_unsigned 32 1 } { dec_unsigned 1 0 } }
+      }
+      /* Set PHI node:   %.01 = phi i32 [ %tmp4, %.lr.ph ], [ %n, %bb ] to   %tmp4 = add i32 %.01, -1 */
+      { store { addr 32 { fref 32 "%.01" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%tmp4" } { dec_unsigned 32 0 } } } }
+      { jump
+       { label 32 { lref 32 "memcpy::.lr.ph" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK ._crit_edge ---------- */
+
+     { label 32 { lref 32 "memcpy::._crit_edge" } { dec_unsigned 32 0 } }
+      /* LLVM statement: memcpy::._crit_edge::  ret i8* %s1 */
+      { return { load 32 { addr 32 { fref 32 "%s1" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION memmove -------------------- */ 
+  { func
+   { label 32 { lref 32 "memmove" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%s1" 32 }
+    { alloc 32 "%s2" 32 }
+    { alloc 32 "%n" 32 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%tmp1" 1 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%p.03" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%s.02" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%.01" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%tmp3" 8 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%tmp5" 32 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%.16" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%tmp7" 32 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%tmp9" 8 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "memmove::bb" } { dec_unsigned 32 0 } }
+      /* LLVM expression: memmove::bb::  %tmp1 = icmp eq i32 %n, 0 */
+      { store { addr 32 { fref 32 "%tmp1" } { dec_unsigned 32 0 } } with
+       { eq 32 { load 32 { addr 32 { fref 32 "%n" } { dec_unsigned 32 0 } } } { dec_unsigned 32 0 } }
+      }
+      /* LLVM statement: memmove::bb::  br i1 %tmp, label %.preheader4, label %.preheader */
+      { switch
+       { u_lt 32 { load 32 { addr 32 { fref 32 "%s2" } { dec_unsigned 32 0 } } } { load 32 { addr 32 { fref 32 "%s1" } { dec_unsigned 32 0 } } } }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "memmove::.preheader4" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "memmove::.preheader" } { dec_unsigned 32 0 } }
+       }
+      }
+
+     /* --------- BASIC BLOCK .preheader4 ---------- */
+
+     { label 32 { lref 32 "memmove::.preheader4" } { dec_unsigned 32 0 } }
+      /* LLVM statement: memmove::.preheader4::  br i1 %tmp1, label %.loopexit, label %.lr.ph7 */
+      { switch { load 1 { addr 32 { fref 32 "%tmp1" } { dec_unsigned 32 0 } } }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "memmove::.loopexit" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "memmove::.preheader4->memmove::.lr.ph7" } { dec_unsigned 32 0 } }
+       }
+      }
+      { label 32 { lref 32 "memmove::.preheader4->memmove::.lr.ph7" } { dec_unsigned 32 0 } }
+      /* Set PHI node:   %.16 = phi i32 [ %tmp7, %.lr.ph7 ], [ %n, %.preheader4 ] to i32 %n */
+      { store { addr 32 { fref 32 "%.16" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%n" } { dec_unsigned 32 0 } } } }
+      { jump
+       { label 32 { lref 32 "memmove::.lr.ph7" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK .preheader ---------- */
+
+     { label 32 { lref 32 "memmove::.preheader" } { dec_unsigned 32 0 } }
+      /* LLVM statement: memmove::.preheader::  br i1 %tmp1, label %.loopexit, label %.lr.ph */
+      { switch { load 1 { addr 32 { fref 32 "%tmp1" } { dec_unsigned 32 0 } } }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "memmove::.loopexit" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "memmove::.preheader->memmove::.lr.ph" } { dec_unsigned 32 0 } }
+       }
+      }
+      { label 32 { lref 32 "memmove::.preheader->memmove::.lr.ph" } { dec_unsigned 32 0 } }
+      /* Set PHI node:   %p.03 = phi i8* [ %tmp2, %.lr.ph ], [ %s2, %.preheader ] to i8* %s2 */
+      { store { addr 32 { fref 32 "%p.03" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%s2" } { dec_unsigned 32 0 } } } }
+      /* Set PHI node:   %s.02 = phi i8* [ %tmp4, %.lr.ph ], [ %s1, %.preheader ] to i8* %s1 */
+      { store { addr 32 { fref 32 "%s.02" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%s1" } { dec_unsigned 32 0 } } } }
+      /* Set PHI node:   %.01 = phi i32 [ %tmp5, %.lr.ph ], [ %n, %.preheader ] to i32 %n */
+      { store { addr 32 { fref 32 "%.01" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%n" } { dec_unsigned 32 0 } } } }
+      { jump
+       { label 32 { lref 32 "memmove::.lr.ph" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK .lr.ph ---------- */
+
+     { label 32 { lref 32 "memmove::.lr.ph" } { dec_unsigned 32 0 } }
+      /* LLVM expression: memmove::.lr.ph::  %tmp3 = load i8* %p.03, align 1, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp3" } { dec_unsigned 32 0 } } with
+       { load 8 { load 32 { addr 32 { fref 32 "%p.03" } { dec_unsigned 32 0 } } } }
+      }
+      /* LLVM statement: memmove::.lr.ph::  store i8 %tmp3, i8* %s.02, align 1, !tbaa !0 */
+      { store { load 32 { addr 32 { fref 32 "%s.02" } { dec_unsigned 32 0 } } } with { load 8 { addr 32 { fref 32 "%tmp3" } { dec_unsigned 32 0 } } } }
+      /* LLVM expression: memmove::.lr.ph::  %tmp5 = add i32 %.01, -1 */
+      { store { addr 32 { fref 32 "%tmp5" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%.01" } { dec_unsigned 32 0 } } } { dec_unsigned 32 4294967295 } { dec_unsigned 1 0 } }
+      }
+      /* LLVM statement: memmove::.lr.ph::  br i1 %tmp6, label %.loopexit, label %.lr.ph */
+      { switch
+       { eq 32 { load 32 { addr 32 { fref 32 "%tmp5" } { dec_unsigned 32 0 } } } { dec_unsigned 32 0 } }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "memmove::.loopexit" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "memmove::.lr.ph->memmove::.lr.ph" } { dec_unsigned 32 0 } }
+       }
+      }
+      { label 32 { lref 32 "memmove::.lr.ph->memmove::.lr.ph" } { dec_unsigned 32 0 } }
+      /* Set PHI node:   %p.03 = phi i8* [ %tmp2, %.lr.ph ], [ %s2, %.preheader ] to   %tmp2 = getelementptr inbounds i8* %p.03, i32 1 */
+      { store { addr 32 { fref 32 "%p.03" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%p.03" } { dec_unsigned 32 0 } } } { dec_unsigned 32 1 } { dec_unsigned 1 0 } }
+      }
+      /* Set PHI node:   %s.02 = phi i8* [ %tmp4, %.lr.ph ], [ %s1, %.preheader ] to   %tmp4 = getelementptr inbounds i8* %s.02, i32 1 */
+      { store { addr 32 { fref 32 "%s.02" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%s.02" } { dec_unsigned 32 0 } } } { dec_unsigned 32 1 } { dec_unsigned 1 0 } }
+      }
+      /* Set PHI node:   %.01 = phi i32 [ %tmp5, %.lr.ph ], [ %n, %.preheader ] to   %tmp5 = add i32 %.01, -1 */
+      { store { addr 32 { fref 32 "%.01" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%tmp5" } { dec_unsigned 32 0 } } } }
+      { jump
+       { label 32 { lref 32 "memmove::.lr.ph" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK .lr.ph7 ---------- */
+
+     { label 32 { lref 32 "memmove::.lr.ph7" } { dec_unsigned 32 0 } }
+      /* LLVM expression: memmove::.lr.ph7::  %tmp7 = add i32 %.16, -1 */
+      { store { addr 32 { fref 32 "%tmp7" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%.16" } { dec_unsigned 32 0 } } } { dec_unsigned 32 4294967295 } { dec_unsigned 1 0 } }
+      }
+      /* LLVM expression: memmove::.lr.ph7::  %tmp9 = load i8* %tmp8, align 1, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp9" } { dec_unsigned 32 0 } } with
+       { load 8
+        { add 32 { load 32 { addr 32 { fref 32 "%s2" } { dec_unsigned 32 0 } } }
+         { select 64 0 31 { u_mul 32 32 { load 32 { addr 32 { fref 32 "%tmp7" } { dec_unsigned 32 0 } } } { dec_unsigned 32 1 } } }
+         { dec_unsigned 1 0 }
+        }
+       }
+      }
+      /* LLVM statement: memmove::.lr.ph7::  store i8 %tmp9, i8* %tmp10, align 1, !tbaa !0 */
+      { store
+       { add 32 { load 32 { addr 32 { fref 32 "%s1" } { dec_unsigned 32 0 } } }
+        { select 64 0 31 { u_mul 32 32 { load 32 { addr 32 { fref 32 "%tmp7" } { dec_unsigned 32 0 } } } { dec_unsigned 32 1 } } }
+        { dec_unsigned 1 0 }
+       }
+       with
+       { load 8 { addr 32 { fref 32 "%tmp9" } { dec_unsigned 32 0 } } }
+      }
+      /* LLVM statement: memmove::.lr.ph7::  br i1 %tmp11, label %.loopexit, label %.lr.ph7 */
+      { switch
+       { eq 32 { load 32 { addr 32 { fref 32 "%tmp7" } { dec_unsigned 32 0 } } } { dec_unsigned 32 0 } }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "memmove::.loopexit" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "memmove::.lr.ph7->memmove::.lr.ph7" } { dec_unsigned 32 0 } }
+       }
+      }
+      { label 32 { lref 32 "memmove::.lr.ph7->memmove::.lr.ph7" } { dec_unsigned 32 0 } }
+      /* Set PHI node:   %.16 = phi i32 [ %tmp7, %.lr.ph7 ], [ %n, %.preheader4 ] to   %tmp7 = add i32 %.16, -1 */
+      { store { addr 32 { fref 32 "%.16" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%tmp7" } { dec_unsigned 32 0 } } } }
+      { jump
+       { label 32 { lref 32 "memmove::.lr.ph7" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK .loopexit ---------- */
+
+     { label 32 { lref 32 "memmove::.loopexit" } { dec_unsigned 32 0 } }
+      /* LLVM statement: memmove::.loopexit::  ret i8* %s1 */
+      { return { load 32 { addr 32 { fref 32 "%s1" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION memset -------------------- */ 
+  { func
+   { label 32 { lref 32 "memset" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%s" 32 }
+    { alloc 32 "%c" 32 }
+    { alloc 32 "%n" 32 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%tmp1" 8 } /* Local Variable (Non-Inlinable Instruction) */ 
+     { alloc 32 "%p.02" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%.01" 32 } /* Local Variable (PHI node) */ 
+     { alloc 32 "%tmp4" 32 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "memset::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: memset::bb::  br i1 %tmp, label %._crit_edge, label %.lr.ph */
+      { switch
+       { eq 32 { load 32 { addr 32 { fref 32 "%n" } { dec_unsigned 32 0 } } } { dec_unsigned 32 0 } }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "memset::._crit_edge" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "memset::.lr.ph" } { dec_unsigned 32 0 } }
+       }
+      }
+
+     /* --------- BASIC BLOCK .lr.ph ---------- */
+
+     { label 32 { lref 32 "memset::.lr.ph" } { dec_unsigned 32 0 } }
+      /* LLVM expression: memset::.lr.ph::  %tmp1 = trunc i32 %c to i8 */
+      { store { addr 32 { fref 32 "%tmp1" } { dec_unsigned 32 0 } } with
+       { select 32 0 7 { load 32 { addr 32 { fref 32 "%c" } { dec_unsigned 32 0 } } } }
+      }
+      /* LLVM statement: memset::.lr.ph::  br label %bb2 */
+      /* Set PHI node:   %p.02 = phi i8* [ %s, %.lr.ph ], [ %tmp3, %bb2 ] to i8* %s */
+      { store { addr 32 { fref 32 "%p.02" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%s" } { dec_unsigned 32 0 } } } }
+      /* Set PHI node:   %.01 = phi i32 [ %n, %.lr.ph ], [ %tmp4, %bb2 ] to i32 %n */
+      { store { addr 32 { fref 32 "%.01" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%n" } { dec_unsigned 32 0 } } } }
+      { jump
+       { label 32 { lref 32 "memset::bb2" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK bb2 ---------- */
+
+     { label 32 { lref 32 "memset::bb2" } { dec_unsigned 32 0 } }
+      /* LLVM statement: memset::bb2::  store i8 %tmp1, i8* %p.02, align 1, !tbaa !0 */
+      { store { load 32 { addr 32 { fref 32 "%p.02" } { dec_unsigned 32 0 } } } with { load 8 { addr 32 { fref 32 "%tmp1" } { dec_unsigned 32 0 } } } }
+      /* LLVM expression: memset::bb2::  %tmp4 = add i32 %.01, -1 */
+      { store { addr 32 { fref 32 "%tmp4" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%.01" } { dec_unsigned 32 0 } } } { dec_unsigned 32 4294967295 } { dec_unsigned 1 0 } }
+      }
+      /* LLVM statement: memset::bb2::  br i1 %tmp5, label %._crit_edge, label %bb2 */
+      { switch
+       { eq 32 { load 32 { addr 32 { fref 32 "%tmp4" } { dec_unsigned 32 0 } } } { dec_unsigned 32 0 } }
+       { target { dec_unsigned 1 1 }
+        { label 32 { lref 32 "memset::._crit_edge" } { dec_unsigned 32 0 } }
+       }
+       { default
+        { label 32 { lref 32 "memset::bb2->memset::bb2" } { dec_unsigned 32 0 } }
+       }
+      }
+      { label 32 { lref 32 "memset::bb2->memset::bb2" } { dec_unsigned 32 0 } }
+      /* Set PHI node:   %p.02 = phi i8* [ %s, %.lr.ph ], [ %tmp3, %bb2 ] to   %tmp3 = getelementptr inbounds i8* %p.02, i32 1 */
+      { store { addr 32 { fref 32 "%p.02" } { dec_unsigned 32 0 } } with
+       { add 32 { load 32 { addr 32 { fref 32 "%p.02" } { dec_unsigned 32 0 } } } { dec_unsigned 32 1 } { dec_unsigned 1 0 } }
+      }
+      /* Set PHI node:   %.01 = phi i32 [ %n, %.lr.ph ], [ %tmp4, %bb2 ] to   %tmp4 = add i32 %.01, -1 */
+      { store { addr 32 { fref 32 "%.01" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "%tmp4" } { dec_unsigned 32 0 } } } }
+      { jump
+       { label 32 { lref 32 "memset::bb2" } { dec_unsigned 32 0 } }
+       leaving
+       0
+      }
+
+     /* --------- BASIC BLOCK ._crit_edge ---------- */
+
+     { label 32 { lref 32 "memset::._crit_edge" } { dec_unsigned 32 0 } }
+      /* LLVM statement: memset::._crit_edge::  ret i8* %s */
+      { return { load 32 { addr 32 { fref 32 "%s" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION atan -------------------- */ 
+  { func
+   { label 32 { lref 32 "atan" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 64 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 64 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 64 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "atan::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: atan::bb::  store volatile double 0.000000e+00, double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 11 52 0. } }
+      /* LLVM expression: atan::bb::  %tmp = load volatile double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 64 { addr 32 { fref 32 "$volatile_64" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: atan::bb::  ret double %tmp */
+      { return { load 64 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION cos -------------------- */ 
+  { func
+   { label 32 { lref 32 "cos" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 64 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 64 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 64 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "cos::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: cos::bb::  store volatile double 0.000000e+00, double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 11 52 0. } }
+      /* LLVM expression: cos::bb::  %tmp = load volatile double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 64 { addr 32 { fref 32 "$volatile_64" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: cos::bb::  ret double %tmp */
+      { return { load 64 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION exp -------------------- */ 
+  { func
+   { label 32 { lref 32 "exp" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 64 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 64 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 64 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "exp::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: exp::bb::  store volatile double 0.000000e+00, double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 11 52 0. } }
+      /* LLVM expression: exp::bb::  %tmp = load volatile double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 64 { addr 32 { fref 32 "$volatile_64" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: exp::bb::  ret double %tmp */
+      { return { load 64 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION log -------------------- */ 
+  { func
+   { label 32 { lref 32 "log" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 64 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 64 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 64 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "log::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: log::bb::  store volatile double 0.000000e+00, double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 11 52 0. } }
+      /* LLVM expression: log::bb::  %tmp = load volatile double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 64 { addr 32 { fref 32 "$volatile_64" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: log::bb::  ret double %tmp */
+      { return { load 64 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION sin -------------------- */ 
+  { func
+   { label 32 { lref 32 "sin" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 64 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 64 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 64 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "sin::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: sin::bb::  store volatile double 0.000000e+00, double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 11 52 0. } }
+      /* LLVM expression: sin::bb::  %tmp = load volatile double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 64 { addr 32 { fref 32 "$volatile_64" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: sin::bb::  ret double %tmp */
+      { return { load 64 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION sqrt -------------------- */ 
+  { func
+   { label 32 { lref 32 "sqrt" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 64 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 64 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 64 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "sqrt::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: sqrt::bb::  store volatile double 0.000000e+00, double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 11 52 0. } }
+      /* LLVM expression: sqrt::bb::  %tmp = load volatile double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 64 { addr 32 { fref 32 "$volatile_64" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: sqrt::bb::  ret double %tmp */
+      { return { load 64 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION frexp -------------------- */ 
+  { func
+   { label 32 { lref 32 "frexp" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 64 }
+    { alloc 32 "%exp" 32 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 64 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 64 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "frexp::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: frexp::bb::  store volatile double 0.000000e+00, double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 11 52 0. } }
+      /* LLVM expression: frexp::bb::  %tmp = load volatile double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 64 { addr 32 { fref 32 "$volatile_64" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: frexp::bb::  ret double %tmp */
+      { return { load 64 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION frexpf -------------------- */ 
+  { func
+   { label 32 { lref 32 "frexpf" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 32 }
+    { alloc 32 "%exp" 32 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 32 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 32 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "frexpf::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: frexpf::bb::  store volatile float 0.000000e+00, float* %_tmp, align 4, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 8 23 0. } }
+      /* LLVM expression: frexpf::bb::  %tmp = load volatile float* %_tmp, align 4, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "$volatile_32" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: frexpf::bb::  ret float %tmp */
+      { return { load 32 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION frexpl -------------------- */ 
+  { func
+   { label 32 { lref 32 "frexpl" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 64 }
+    { alloc 32 "%exp" 32 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 64 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 64 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "frexpl::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: frexpl::bb::  store volatile double 0.000000e+00, double* %_tmp, align 4, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 11 52 0. } }
+      /* LLVM expression: frexpl::bb::  %tmp = load volatile double* %_tmp, align 4, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 64 { addr 32 { fref 32 "$volatile_64" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: frexpl::bb::  ret double %tmp */
+      { return { load 64 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION ldexp -------------------- */ 
+  { func
+   { label 32 { lref 32 "ldexp" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 64 }
+    { alloc 32 "%exp" 32 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 64 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 64 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "ldexp::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: ldexp::bb::  store volatile double 0.000000e+00, double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 11 52 0. } }
+      /* LLVM expression: ldexp::bb::  %tmp = load volatile double* %_tmp, align 8, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 64 { addr 32 { fref 32 "$volatile_64" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: ldexp::bb::  ret double %tmp */
+      { return { load 64 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION ldexpf -------------------- */ 
+  { func
+   { label 32 { lref 32 "ldexpf" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 32 }
+    { alloc 32 "%exp" 32 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 32 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 32 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "ldexpf::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: ldexpf::bb::  store volatile float 0.000000e+00, float* %_tmp, align 4, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 8 23 0. } }
+      /* LLVM expression: ldexpf::bb::  %tmp = load volatile float* %_tmp, align 4, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 32 { addr 32 { fref 32 "$volatile_32" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: ldexpf::bb::  ret float %tmp */
+      { return { load 32 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ /* -------------------- FUNCTION ldexpl -------------------- */ 
+  { func
+   { label 32 { lref 32 "ldexpl" } { dec_unsigned 32 0 } }
+   { arg_decls
+    { alloc 32 "%x" 64 }
+    { alloc 32 "%exp" 32 }
+   }
+   { scope
+    { decls
+     { alloc 32 "%_tmp" 64 } /* alloca'd memory */ 
+     { alloc 32 "%tmp" 64 } /* Local Variable (Non-Inlinable Instruction) */ 
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK bb ---------- */
+
+     { label 32 { lref 32 "ldexpl::bb" } { dec_unsigned 32 0 } }
+      /* LLVM statement: ldexpl::bb::  store volatile double 0.000000e+00, double* %_tmp, align 4, !tbaa !0 */
+      { store { addr 32 { fref 32 "%_tmp" } { dec_unsigned 32 0 } } with { float_val 11 52 0. } }
+      /* LLVM expression: ldexpl::bb::  %tmp = load volatile double* %_tmp, align 4, !tbaa !0 */
+      { store { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } with { load 64 { addr 32 { fref 32 "$volatile_64" } { dec_unsigned 32 0 } } } }
+      /* LLVM statement: ldexpl::bb::  ret double %tmp */
+      { return { load 64 { addr 32 { fref 32 "%tmp" } { dec_unsigned 32 0 } } } }
+    }
+   }
+  }
+ }
+}
