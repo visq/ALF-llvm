@@ -51,16 +51,10 @@ You need git (the version control system).
     git clone http://llvm.org/git/clang.git  
     cd clang
 
-<<<<<<< HEAD
   cd clang
   # [llvm/tools/clang/] synchronize with the llvm version (currently: release 3.0)
   git checkout remotes/origin/release_30 -b release_30
   cd ../..
-=======
-    # [llvm/tools/clang/] synchronize with the llvm version (currently: release 2.9)
-    git checkout remotes/origin/release_29 -b release_29
-    cd ../..
->>>>>>> 21a1eff... READMEs: README.alf updated to markdown (for webpage), added general README for timing analysis extensions (README.otap)
  
 _NOTE_: Currently there is no master branch in the otap-llvm repository.
 In my repository, the master branch points to the HEAD of the
@@ -129,14 +123,9 @@ When analyzing the ALF modules using SWEET, you need to specify the entry point.
 
     sweet -i=test.alf func=main -ae ffg=ub vola=t pu css -f co
 
-<<<<<<< HEAD
 XXX: NEEDS UPDATE
 
 There are a few simple tests in test/CodeGen/ALF. Here is how it works (starting in llvm directory):
-=======
-Trying it out
--------------
->>>>>>> 21a1eff... READMEs: README.alf updated to markdown (for webpage), added general README for timing analysis extensions (README.otap)
 
 The tests for the ALFBackend are located in `test/CodeGen/ALF`.
 Here is how it works (starting in llvm directory):
