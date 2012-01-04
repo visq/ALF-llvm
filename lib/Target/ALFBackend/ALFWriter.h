@@ -190,7 +190,7 @@ namespace llvm {
   	  Mang = new Mangler(*TCtx, *TD);
 	}
 
-	void addMemoryArea(uint64_t Start, uint64_t End, uint64_t IsVolatile) {
+	void addMemoryArea(uint64_t Start, uint64_t End, bool IsVolatile) {
 		std::string Name = ABS_REF_PREFIX + itostr(MemoryAreas.size());
 		MemoryAreas.push_back(MemoryArea(Name, Start, End, IsVolatile));
 	}

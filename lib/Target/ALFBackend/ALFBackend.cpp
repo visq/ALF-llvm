@@ -664,13 +664,13 @@ void ALFBackend::addMemoryAreas(std::string& AreaSpec, bool IsVolatile)
 	StringRef(AreaSpec).split(MemoryAreaList, StringRef(","));
 	for(SmallVector<StringRef,8>::iterator I = MemoryAreaList.begin(), E = MemoryAreaList.end(); I!=E; ++I) {
 		  std::pair<StringRef,StringRef> StartEnd = I->split("-");
-		  uint64_t Start, End;
+		  unsigned long long Start, End;
 		  if(StartEnd.first.getAsInteger(0,Start) || StartEnd.second.getAsInteger(0,End)) {
 			  report_fatal_error("Bad area specification '"+AreaSpec+"':  Range " +
 					             StartEnd.first + " to " + StartEnd.second +
 					             " is not a pair of valid addresses.");
 		  }
-		  Writer.addMemoryArea(Start, End, IsVolatile);
+		  Writer.addMemoryArea((uint64_t)Start, (uint64_t)End, IsVolatile);
 	}
 }
 
