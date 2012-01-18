@@ -253,6 +253,10 @@ namespace llvm {
         	    atom(leaving);
         	    endList("jump");
           }
+          void null() {
+              startList("null");
+              endList("null");
+          }
           // For initializers
           void ref(string id, unsigned long long offs = 0) {
               startList("ref",true);
