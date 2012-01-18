@@ -55,6 +55,10 @@ void llvm::alf_fatal_error(const string& Reason, Instruction& Ins) {
 void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Constant* Const) {
 
 	Type *Ty = Const->getType();
+	if(isa<UndefValue>(Const)) {
+	    // Omit undef initializers
+	    return;
+	}
 	if(isa<ConstantAggregateZero>(Const)) {
 		if(SequentialType *SeqTy = dyn_cast<SequentialType>(Ty)) {
 			unsigned NumElems;
@@ -119,7 +123,7 @@ void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffse
     case Type::ArrayTyID: {
         // Emit Initializer for every element
         assert(isa<ConstantArray>(Const) && "Non-Zero Array Constant not of type ConstantArray?");
-        emitCompositeInitializers(M,V,BitOffset,cast<ConstantVector>(Const));
+        emitCompositeInitializers(M,V,BitOffset,cast<ConstantArray>(Const));
         return;
     }
     case Type::StructTyID: {
@@ -623,10 +627,11 @@ void ALFWriter::visitSelectInst(SelectInst &I) {
   emitOperand(I.getFalseValue());
   Output.endList("if");
 #else
-  std::string InstLabel = getInstructionLabel(&I);
+  std::string InstLabel = getInstructionLabel(I.getParent(), CurrentStatementIndex);
   std::string ThenLabel = InstLabel + "::then";
   std::string ElseLabel = InstLabel + "::else";
   std::string JoinLabel = InstLabel + "::join";
+
   Output.startList("switch");
   emitOperand(I.getCondition());
   Output.startList("target");
@@ -650,6 +655,8 @@ void ALFWriter::visitSelectInst(SelectInst &I) {
   }
   // join
   Output.label(JoinLabel,0);
+  // nop to avoid double label errors
+  Output.null();
 #endif
 }
 
@@ -1305,7 +1312,7 @@ std::auto_ptr<ALFConstant> ALFWriter::foldConstant(const Constant* Const) {
 			return std::auto_ptr<ALFConstant>( new ALFConstAddress(false, ABS_REF, AbsAddress * 8) );
 		} else {
 			errs() << "llvm2alf: foldConstant: invalid absolute address (not specified on the command line): " << AbsAddress << "\n";
-			return std::auto_ptr<ALFConstant>( 0 );		    
+			return std::auto_ptr<ALFConstant>( 0 );
 		}
 
     } else if(CE && CE->getNumOperands() == 1) {
@@ -1562,6 +1569,26 @@ void  ALFWriter::emitFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instr
 	Output.endList(op);
 }
 
+void ALFWriter::basicBlockHeader(const BasicBlock* BB) {
+    Output.newline();
+    Output.comment("--------- BASIC BLOCK " + BB->getNameStr() + " ----------",false);
+    Output.newline();
+    Output.label(getBasicBlockLabel(BB), 0);
+    Output.incrementIndent();
+    IsBasicBlockStart = true;
+}
+
+void ALFWriter::statementHeader(const Instruction &I, unsigned Index) {
+    Output.comment("LLVM expression: " + I.getParent()->getParent()->getNameStr() + "::" +
+                   I.getParent()->getNameStr() + "::" + valueToString(I), false);
+    CurrentStatementIndex = Index;
+    if(! IsBasicBlockStart) {
+        Output.label(getInstructionLabel(I.getParent(),Index));
+    } else {
+        IsBasicBlockStart = false;
+    }
+}
+
 std::string ALFWriter::getValueName(const Value *Operand) {
 
   // Resolve potential alias.
@@ -1595,12 +1622,12 @@ std::string ALFWriter::getBasicBlockLabel(const BasicBlock* BB) {
   return BB->getParent()->getNameStr() + "::" + name;
 }
 
-std::string ALFWriter::getInstructionLabel(const Instruction *I) {
-	return I->getParent()->getParent()->getNameStr() + "::ins::" +getValueName(I);
+std::string ALFWriter::getInstructionLabel(const BasicBlock *BB, unsigned Index) {
+    return getBasicBlockLabel(BB) + "::" + utostr(Index);
 }
 
 std::string ALFWriter::getConditionalJumpLabel(const BasicBlock* Pred, const BasicBlock* Succ) {
-    return getBasicBlockLabel(Pred) + "->" + getBasicBlockLabel(Succ);
+    return getBasicBlockLabel(Pred) + "::edge::" + getBasicBlockLabel(Succ);
 }
 
 std::string ALFWriter::getAnonValueName(const Value* Operand) {

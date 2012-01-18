@@ -621,17 +621,13 @@ void ALFBackend::visitFunction(Function &F) {
 void ALFBackend::visitBasicBlock(BasicBlock *BB) {
 
   /// Print Label
-  Output.newline();
-  Output.comment("--------- BASIC BLOCK " + BB->getNameStr() + " ----------",false);
-  Output.newline();
-  Output.label(Writer.getBasicBlockLabel(BB), 0);
-  Output.incrementIndent();
-  BB->getFirstNonPHIOrDbg();
+  Writer.basicBlockHeader(BB);
+  unsigned Ix = 0;
   // Output all of the instructions in the basic block...
   for (BasicBlock::iterator II = BB->begin(), E = BB->end(); II != E;
-       ++II) {
-    // Do not emit code for debug instructions
-    if (isa<DbgInfoIntrinsic>(*II)) {
+       ++Ix, ++II) {
+    // Do not emit code for PHI nodes / debug instructions
+    if (isa<PHINode>(*II) || isa<DbgInfoIntrinsic>(*II)) {
         continue;
     }
 
@@ -640,13 +636,10 @@ void ALFBackend::visitBasicBlock(BasicBlock *BB) {
         continue;
     }
 
+    Writer.statementHeader(*II, Ix);
     if(Writer.isExpressionInst(*II)) {
-        Output.comment("LLVM expression: " + II->getParent()->getParent()->getNameStr() + "::" +
-        		  II->getParent()->getNameStr() + "::" + valueToString(*II), false);
         Writer.emitTemporaryStore(II);
     } else {
-        Output.comment("LLVM statement: " + II->getParent()->getParent()->getNameStr() + "::" +
-        		  II->getParent()->getNameStr() + "::" + valueToString(*II), false);
         Writer.visit(*II);
     }
 

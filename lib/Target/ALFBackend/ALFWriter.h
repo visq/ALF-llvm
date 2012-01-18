@@ -144,6 +144,10 @@ namespace llvm {
     /// Memory Areas
     std::vector<MemoryArea> MemoryAreas;
 
+    /// Labeling
+    unsigned IsBasicBlockStart;
+    unsigned CurrentStatementIndex;
+
 	/// unique name generation and counters
     DenseMap<const Value*, unsigned> AnonValueNumbers;
     unsigned NextAnonValueNumber;
@@ -240,10 +244,8 @@ namespace llvm {
     void emitConstant(Constant* Const);
     void emitGlobalValue(const GlobalValue *GV, uint64_t BitOffset);
     void emitConstantExpression(const ConstantExpr * CE);
-
     std::auto_ptr<ALFConstant> foldConstant(const Constant* Const);
     std::auto_ptr<ALFConstant> foldBinaryConstantExpression(const ConstantExpr* CE);
-
     uint64_t getConstantPointerOffset(const ConstantExpr* CE);
 
     // Instruction visitation functions
@@ -390,14 +392,18 @@ namespace llvm {
     /// Set all PHI variables of the successor block, assuming the predecessor is known
     void setPHICopiesForSuccessor(BasicBlock *PredBlock, BasicBlock* SuccBlock);
 
+    /// Labeling/Comments
+    void basicBlockHeader(const BasicBlock* BB);
+    void statementHeader(const Instruction &I, unsigned Index);
+
     /// ALF variable name of some Value (except BasicBlock labels, see getBasicBlockLabel)
     std::string getValueName(const Value *Operand);
 
     /// ALF name for a basic block label (needs to be unique to the module)
-    std::string getBasicBlockLabel(const BasicBlock* BB);
+    std::string getBasicBlockLabel(const BasicBlock *BB);
 
     /// ALF name for labeling instruction statement (needs to be unique to the module)
-    std::string getInstructionLabel(const Instruction *I);
+    std::string getInstructionLabel(const BasicBlock *BB, unsigned Index);
 
     /// ALF name for the basic block representing the edge of a conditional jump
     std::string getConditionalJumpLabel(const BasicBlock* Pred, const BasicBlock* Succ);
