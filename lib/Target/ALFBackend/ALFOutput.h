@@ -20,6 +20,7 @@
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/DerivedTypes.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/InstVisitor.h"
@@ -43,6 +44,9 @@ namespace llvm {
           unsigned MaxIndent,Indent;
           enum { LAYOUT_NONE = 0, LAYOUT_ONELINE = 1, LAYOUT_MULTILINE = 2 };
           unsigned StateLayout;
+
+          std::string CurrentLabel;
+          uint64_t CurrentLabelOffset;
 
           bool UseMacros;
           unsigned LeastAddrUnit;
@@ -100,6 +104,7 @@ namespace llvm {
         	  Out << '\n';
           }
 
+          /// start an S-Expression list; only use this if no specific builder instruction is available
           void startList(string Cmd, bool Oneline = false) {
               NamedListStack.push_back(Cmd);
               if(Oneline) {
@@ -113,6 +118,7 @@ namespace llvm {
               ++Indent;
           }
 
+          /// end an S-Expression; Cmd is used to validate the nesting
           void endList(string Cmd) {
               string Top = NamedListStack.back();
               if(Top != Cmd) {
@@ -149,34 +155,34 @@ namespace llvm {
           //                        ALF s-expressions
           //===----------------------------------------------------------------------===//
 
-          // macro defs to make code more readable
-          // this assumes fixed width for addresses
+          /// macro defs to make code more readable; assumes fixed width for addresses
           void macroDefs() {
               UseMacros = false;
               // saddr x ~ addr x 0
               startList("def");
-               startList("saddr",true); atom("@frefid"); endList("saddr");
-               address("@frefid",0);
+              startList("saddr",true); atom("@frefid"); endList("saddr");
+              address("@frefid",0);
               endList("def");
               // slabel x ~ label x 0
               startList("def");
-               startList("slabel",true); atom("@lrefid"); endList("slabel");
-               label("@lrefid",0);
+              startList("slabel",true); atom("@lrefid"); endList("slabel");
+              labelRef("@lrefid",0);
               endList("def");
               // true ~ dec_unsigned 1 1
               startList("def");
-               startList("true",true); endList("true");
-               dec_unsigned(1,1);
+              startList("true",true); endList("true");
+              dec_unsigned(1,1);
               endList("def");
               // false = dec_unsigned 1 0
               startList("def");
               startList("false",true); endList("false");
-               dec_unsigned(1,0);
+              dec_unsigned(1,0);
               endList("def");
               UseMacros = true;
           }
-          // ALF has C-Style comments
-          void comment(const string& comment, bool Inline = true) {
+
+          /// ALF has C-Style comments
+          void comment(const string& Comment, bool Inline = true) {
         	  if(!Inline) {
                   Out << '\n';
                   for(unsigned i = 0; i < Indent && i < MaxIndent; ++i) Out << ' ';
@@ -184,8 +190,8 @@ namespace llvm {
         		  Out << ' ';
         	  }
         	  Out << "/* ";
-        	  for(string::const_iterator i = comment.begin(),
-						           e = comment.end(); i != e; ++i) {
+        	  for(string::const_iterator i = Comment.begin(),
+						           e = Comment.end(); i != e; ++i) {
         		  if(*i == '/') {
         			  Out << "\\/";
         		  } else {
@@ -197,107 +203,150 @@ namespace llvm {
         		  Out << ' ';
         	  }
           }
-          // emit quoted identifier
+
           void undefined(unsigned BitWidth) {
             startList("undefined",true);
             atom(BitWidth);
             endList("undefined");
           }
+
           void lauDef() {
             startList("least_addr_unit", true);
             atom(LeastAddrUnit);
             endList("least_addr_unit");
           }
-          void fref(string id) {
+
+          void fref(string Id) {
               startList("fref",true);
               atom(BitsFRef);
-              identifier(id);
+              identifier(Id);
               endList("fref");
           }
-          void address(string id, uint64_t offs = 0) {
+
+          void address(string Id, uint64_t offs = 0) {
               if(UseMacros && offs == 0) {
                   startList("!saddr", true);
-                  identifier(id);
+                  identifier(Id);
                   endList("!saddr");
                   return;
               }
               startList("addr", true);
               atom(BitsFRef);
-              fref(id);
+              fref(Id);
               offset(offs);
               endList("addr");
           }
-          void lref(string id) {
+
+          void lref(string Id) {
               startList("lref", true);
               atom(BitsLRef);
-              identifier(id);
+              identifier(Id);
               endList("lref");
           }
-          void label(string id, uint64_t offs = 0) {
+
+          void labelRef(string Id, uint64_t offs = 0) {
               if(UseMacros && offs == 0) {
                   startList("!slabel", true);
-                  identifier(id);
+                  identifier(Id);
                   endList("!slabel");
                   return;
               }
               startList("label");
               atom(BitsLRef);
-              lref(id);
+              lref(Id);
               offset(offs);
               endList("label");
           }
-          void jump(string id, uint64_t offs = 0, uint64_t leaving = 0) {
-        	    startList("jump");
-        	    label(id, offs);
-        	    atom("leaving");
-        	    atom(leaving);
-        	    endList("jump");
+
+          // === Statements ===
+
+          // change the current statement label
+          void setStmtLabel(string Label) {
+              CurrentLabel = Label;
+              CurrentLabelOffset = 0;
           }
+
+          // emit a statement label; each statement must have at exactly one unique
+          // label; we use label offsets to generate unique labels
+          void stmtLabel() {
+              string Label = CurrentLabel;
+              if(CurrentLabelOffset > 0) {
+                  Label += "::" + utostr(CurrentLabelOffset);
+              }
+              labelRef(Label, 0);
+              CurrentLabelOffset++;
+          }
+
+          void startStmt(const string &Cmd) {
+              stmtLabel();
+              startList(Cmd);
+          }
+
+          void endStmt(const string &Cmd) {
+              endList(Cmd);
+          }
+
           void null() {
-              startList("null");
-              endList("null");
+              startStmt("null");
+              endStmt("null");
           }
+
+          void jump(const string &Id, uint64_t Offset = 0, uint64_t Leaving = 0) {
+                startStmt("jump");
+                labelRef(Id, Offset);
+        	    atom("leaving");
+        	    atom(Leaving);
+        	    endStmt("jump");
+          }
+
+
           // For initializers
-          void ref(string id, unsigned long long offs = 0) {
+          void ref(string Id, uint64_t Offset = 0) {
               startList("ref",true);
-              identifier(id);
-              offset(offs);
+              identifier(Id);
+              offset(Offset);
               endList("ref");
           }
+
           // Offset of Address or Label
           // Parameter is in Bits, and converted to LAU
-          void offset(unsigned long long offsBits) {
-              assert(offsBits % LeastAddrUnit == 0 && "Addressing Error (unaligned offset)");
+          void offset(uint64_t OffsetBits) {
+              assert(OffsetBits % LeastAddrUnit == 0 && "Addressing Error (unaligned offset)");
               startList("dec_unsigned", true);
               atom(BitsOffset);
-              atom(offsBits / LeastAddrUnit);
+              atom(OffsetBits / LeastAddrUnit);
               endList("dec_unsigned");
           }
-          void alloc(string id, unsigned size) {
+
+          void alloc(string Id, unsigned Size) {
               startList("alloc");
               atom(BitsFRef);
-              identifier(id);
-              atom(size);
+              identifier(Id);
+              atom(Size);
               endList("alloc");
           }
-          void load(unsigned size, string fref, unsigned long long offs = 0) {
+
+          void load(unsigned Size, string Fref, uint64_t Offset = 0) {
               startList("load", true);
-              atom(size);
-              address(fref, offs);
+              atom(Size);
+              address(Fref, Offset);
               endList("load");
           }
-          void dec_unsigned(unsigned BitWidth, unsigned long long value) {
+
+          void dec_unsigned(unsigned BitWidth, uint64_t Value) {
               startList("dec_unsigned",true);
               atom(BitWidth);
-              atom(value);
+              atom(Value);
               endList("dec_unsigned");
           }
+
           void dec_unsigned(unsigned BitWidth, const APInt& Value) {
               startList("dec_unsigned",true);
               atom(BitWidth);
               atom(Value.toString(10, false));
               endList("dec_unsigned");
           }
+
           void float_val(unsigned ExpBitWidth, unsigned FracBitWidth, const APFloat& Value) {
 
         	  unsigned totalBitWidth = 1 + ExpBitWidth + FracBitWidth;
@@ -397,7 +446,7 @@ namespace llvm {
 		}
 		virtual void print(ALFOutput& Out) {
 			if(IsCodeAddress) {
-				Out.label(Name, Offset);
+				Out.labelRef(Name, Offset);
 			} else {
 				Out.address(Name, Offset);
 			}

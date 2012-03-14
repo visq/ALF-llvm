@@ -518,10 +518,10 @@ bool ALFBackend::doInitialization(Module &M) {
 		  Output.startList("decls"); Output.endList("decls");
 		  Output.startList("inits"); Output.endList("inits");
 		  Output.startList("stmts");
-		  Output.startList("return");
+		  Output.startStmt("return");
 		  Type *RTy = F->getReturnType();
 		  Output.load(Writer.getBitWidth(RTy),Writer.getVolatileStorage(RTy),0);
-		  Output.endList("return");
+		  Output.endStmt("return");
 		  Output.endList("stmts");
 		  Output.endList("scope");
 		  Output.endList("func");
