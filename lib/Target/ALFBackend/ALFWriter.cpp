@@ -223,7 +223,7 @@ void ALFWriter::emitConstant(Constant *CPV) {
 		Output.address(NULL_REF, 0);
 	} else if(BlockAddress *CBA = dyn_cast<BlockAddress>(CPV)) {
 	    BasicBlock *BB = CBA->getBasicBlock();
-	    Output.label(getBasicBlockLabel(BB), 0);
+	    Output.labelRef(getBasicBlockLabel(BB), 0);
 	} else if(ConstantAggregateZero *CAZ = dyn_cast<ConstantAggregateZero>(CPV)) {
 		report_fatal_error("[llvm2alf] emitConstant(): unsupported ConstantAggregateZero. "
 				           "Type: " + typeToString(*CAZ->getType()));
@@ -248,7 +248,7 @@ void ALFWriter::emitGlobalValue(const GlobalValue *GV, uint64_t Offset) {
 	if(const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GV)) {
 		Output.address(getValueName(GVar), Offset);
 	} else if(const Function *FVar = dyn_cast<Function>(GV)) {
-		Output.label(getValueName(FVar), Offset);
+		Output.labelRef(getValueName(FVar), Offset);
 	} else {
 		report_fatal_error("[llvm2alf] emitGlobalValue: Unsupported Global Value Type: " + valueToString(*GV));
 	}
@@ -263,7 +263,7 @@ void ALFWriter::emitFunctionSignature(const Function *F) {
   const AttrListPtr &PAL = F->getAttributes();
 
   // Emit name
-  Output.label(getValueName(F), 0);
+  Output.labelRef(getValueName(F), 0);
 
   // Emit formal parameters
   Output.startList("arg_decls");
@@ -306,11 +306,11 @@ void ALFWriter::visitReturnInst(ReturnInst &I) {
       alf_fatal_error("struct return not yet supported", I);
   }
 
-  Output.startList("return");
+  Output.startStmt("return");
   for (unsigned i = 0, e = I.getNumOperands(); i != e; ++i) {
       emitOperand(I.getOperand(i));
   }
-  Output.endList("return");
+  Output.endStmt("return");
 }
 
 void ALFWriter::visitSwitchInst(SwitchInst &SI) {
@@ -355,8 +355,7 @@ void ALFWriter::visitIndirectBrInst(IndirectBrInst &IBI) {
 // will often be that of assert(0). As ALF is missing asserts, we
 // currently emit a nop (which is NOT a good solution IMHO).
 void ALFWriter::visitUnreachableInst(UnreachableInst &I) {
-	Output.startList("null", true);
-	Output.endList("null");
+    Output.null();
 }
 
 
@@ -378,12 +377,12 @@ void ALFWriter::visitStoreInst(StoreInst &I) {
   }
 
   // Emit LHS
-  Output.startList("store");
+  Output.startStmt("store");
   emitOperand(I.getPointerOperand());
 
   Output.atom("with");
   emitOperand(I.getOperand(0));
-  Output.endList("store");
+  Output.endStmt("store");
 }
 
 
@@ -416,7 +415,7 @@ void ALFWriter::visitCallInst(CallInst &I) {
 
   // if (I.isTailCall()) Out << " /*tail*/ ";
 
-  Output.startList("call",false);
+  Output.startStmt("call");
 
   if (!WroteCallee) {
     // cf C Backend: Inserts a cast if:
@@ -462,7 +461,7 @@ void ALFWriter::visitCallInst(CallInst &I) {
     Output.address(getValueName(&I), 0);
   }
 
-  Output.endList("call");
+  Output.endStmt("call");
 }
 
 /// visitBuiltinCall - Handle the call to the specified builtin.  Returns true
@@ -499,7 +498,7 @@ bool ALFWriter::visitBuiltinCall(CallInst &I, Intrinsic::ID ID,
 		  Value *Dst = I.getOperand(0);
 		  Value *Src = I.getOperand(1);
 
-		  Output.startList("store",true);
+		  Output.startStmt("store");
 		  for(uint64_t I = 0, E = Len->getLimitedValue(); I!=E; ++I) {
 			  Output.startList("add",true);
 			  Output.atom(TD->getTypeSizeInBits(Dst->getType()));
@@ -524,7 +523,7 @@ bool ALFWriter::visitBuiltinCall(CallInst &I, Intrinsic::ID ID,
 				  Output.endList("load");
 			  }
 		  }
-		  Output.endList("store");
+		  Output.endStmt("store");
 		  return true;
 	  }
   case Intrinsic::vastart:
@@ -559,29 +558,29 @@ void ALFWriter::visitSelectInst(SelectInst &I) {
   std::string ElseLabel = InstLabel + "::else";
   std::string JoinLabel = InstLabel + "::join";
 
-  Output.startList("switch");
+  Output.startStmt("switch");
   emitOperand(I.getCondition());
   Output.startList("target");
   emitOperand(ConstantInt::getTrue(I.getCondition()->getType()));
-  Output.label(ThenLabel, 0);
+  Output.labelRef(ThenLabel, 0);
   Output.endList("target");
   Output.startList("default");
-  Output.label(ElseLabel, 0);
+  Output.labelRef(ElseLabel, 0);
   Output.endList("default");
-  Output.endList("switch");
+  Output.endStmt("switch");
 
   // then and else branch
   for(int Branch = 0; Branch < 2; Branch++) {
-	  Output.label((Branch == 0) ? ThenLabel : ElseLabel,0);
-	  Output.startList("store");
+	  Output.setStmtLabel((Branch == 0) ? ThenLabel : ElseLabel);
+	  Output.startStmt("store");
 	  Output.address(getValueName(&I));
 	  Output.atom("with");
 	  emitOperand((Branch == 0) ? I.getTrueValue() : I.getFalseValue());
-	  Output.endList("store");
-	  Output.jump(JoinLabel, 0);
+	  Output.endStmt("store");
+	  Output.jump(JoinLabel);
   }
   // join
-  Output.label(JoinLabel,0);
+  Output.setStmtLabel(JoinLabel);
   // nop to avoid double label errors
   Output.null();
 #endif
@@ -1044,11 +1043,11 @@ void ALFWriter::visitCastInst(CastInst &I) {
 /// ALF variable. Directly *after* the store, the value
 /// of emitLoad(I) is equivalent to emitExpression(I)
 void ALFWriter::emitTemporaryStore(Instruction* I) {
-    Output.startList("store",false);
+    Output.startStmt("store");
     Output.address(getValueName(I), 0);
     Output.atom("with");
     emitExpression(I);
-    Output.endList("store");
+    Output.endStmt("store");
 }
 
 
@@ -1101,7 +1100,7 @@ void ALFWriter::emitLoad(Value* Operand) {
 
 void ALFWriter::emitUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
     setPHICopiesForSuccessor (Block, Succ);
-    Output.jump(getBasicBlockLabel(Succ), 0);
+    Output.jump(getBasicBlockLabel(Succ));
 }
 
 
@@ -1116,34 +1115,34 @@ void ALFWriter::emitSwitch(TerminatorInst& SI,
 	  BasicBlock *BB = SI.getParent();
 
 	  std::set<BasicBlock*> EdgeBlocks;
-	  Output.startList("switch");
+	  Output.startStmt("switch");
 	  emitOperand(Condition);
 	  for(CaseVector::const_iterator I = Cases.begin(), E = Cases.end(); I!=E; ++I) {
 		    Output.startList("target");
 		    emitOperand(I->first);
 		    if(isa<PHINode>(I->second->begin())) { /* need to set phi variables on the edge */
-				Output.label(getConditionalJumpLabel(BB, I->second));
+				Output.labelRef(getConditionalJumpLabel(BB, I->second));
 				EdgeBlocks.insert(I->second);
 		    } else {
-		    	Output.label(getBasicBlockLabel(I->second));
+		    	Output.labelRef(getBasicBlockLabel(I->second));
 		    }
 		    Output.endList("target");
 	  }
 	  Output.startList("default");
 	  if(isa<PHINode>(DefaultCase->begin())) { /* need to set phi variables on the edge */
-		  Output.label(getConditionalJumpLabel(BB,DefaultCase));
+		  Output.labelRef(getConditionalJumpLabel(BB,DefaultCase));
 		  EdgeBlocks.insert(DefaultCase);
 	  } else {
-	      Output.label(getBasicBlockLabel(DefaultCase));
+	      Output.labelRef(getBasicBlockLabel(DefaultCase));
 	  }
 	  Output.endList("default");
-	  Output.endList("switch");
+	  Output.endStmt("switch");
 
 	  // Insert basic blocks to set phi copies (one for each succ with phi nodes)
 	  for(std::set<BasicBlock*>::const_iterator I = EdgeBlocks.begin(), E = EdgeBlocks.end();
 			  I!=E; ++I) {
 		  BasicBlock* Succ = *I;
-		  Output.label(getConditionalJumpLabel(BB, Succ));
+		  Output.setStmtLabel(getConditionalJumpLabel(BB, Succ));
 		  emitUnconditionalJump(BB, Succ);
 	  }
 }
@@ -1164,11 +1163,11 @@ void ALFWriter::setPHICopiesForSuccessor (BasicBlock *PredBlock, BasicBlock *Suc
     if (!isa<UndefValue>(IV)) {
 	  Output.comment("Set PHI node: " + valueToString(*PN) + " to " + valueToString(*IV), false);
 
-	  Output.startList("store");
+	  Output.startStmt("store");
       Output.address(getValueName(I), 0);
       Output.atom("with");
       emitOperand(IV);
-      Output.endList("store");
+      Output.endStmt("store");
     }
   }
 }
@@ -1549,7 +1548,7 @@ void ALFWriter::basicBlockHeader(const BasicBlock* BB) {
     Output.newline();
     Output.comment("--------- BASIC BLOCK " + BB->getNameStr() + " ----------",false);
     Output.newline();
-    Output.label(getBasicBlockLabel(BB), 0);
+    Output.setStmtLabel(getBasicBlockLabel(BB));
     Output.incrementIndent();
     IsBasicBlockStart = true;
 }
@@ -1559,7 +1558,7 @@ void ALFWriter::statementHeader(const Instruction &I, unsigned Index) {
                    I.getParent()->getNameStr() + "::" + valueToString(I), false);
     CurrentStatementIndex = Index;
     if(! IsBasicBlockStart) {
-        Output.label(getInstructionLabel(I.getParent(),Index));
+        Output.setStmtLabel(getInstructionLabel(I.getParent(),Index));
     } else {
         IsBasicBlockStart = false;
     }
