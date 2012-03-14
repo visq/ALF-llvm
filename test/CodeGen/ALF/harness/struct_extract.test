@@ -1,0 +1,4 @@
+M=struct_extract
+source libtest
+sweet_css || die "sweet single-path execution failure/timeout"
+check_ret_val "u[225,225]" || die "wrong result: 225 /= ${RESULT}"

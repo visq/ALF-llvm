@@ -88,7 +88,7 @@ logdummy(r)
 }
 
 static float 
-fabs(float n)
+_fabs(float n)
 {
 	float           f;
 
@@ -100,7 +100,7 @@ fabs(float n)
 }
 
 static float 
-sqrt(val)
+_sqrt(val)
 	float           val;
 {
 	float           x = val / 10;
@@ -121,7 +121,7 @@ sqrt(val)
 				dx = (val - (x * x)) / (2.0 * x);
 				x = x + dx;
 				diff = val - (x * x);
-				if (fabs(diff) <= min_tol)
+				if (_fabs(diff) <= min_tol)
 					flag = 1;
 			} else
 				x = x;
@@ -132,7 +132,7 @@ sqrt(val)
 
 
 static float 
-sin(rad)
+_sin(rad)
 	float           rad;
 {
 	float           app;
@@ -149,7 +149,7 @@ sin(rad)
 		((2.0 * inc) * (2.0 * inc + 1.0));
 	app = app + diff;
 	inc++;
-	while (fabs(diff) >= 0.00001) {
+	while (_fabs(diff) >= 0.00001) {
 		diff = (diff * (-(rad * rad))) /
 			((2.0 * inc) * (2.0 * inc + 1.0));
 		app = app + diff;
@@ -182,10 +182,10 @@ gaussian()
 			v1 *= rconst1;
 			v2 *= rconst1;
 			r = v1 * v1 + v2 * v2;
-		}		/* make radius less than 1 */
+		}		/* make radius less than 1 *
 
 /* remap v1 and v2 to two Gaussian numbers */
-		fac = sqrt(-2.0f * logdummy(r) / r);
+		fac = _sqrt(-2.0f * logdummy(r) / r);
 		gstore = v1 * fac;	/* store one */
 		gaus = v2 * fac;/* return one */
 		ready = 1;	/* set ready flag */
@@ -207,11 +207,11 @@ main()
 	int             k;
 
 /* create signal plus noise */
-	signal_amp = sqrt(2.0);
-	noise_amp = 0.2 * sqrt(12.0);
+	signal_amp = _sqrt(2.0);
+	noise_amp = 0.2 * _sqrt(12.0);
 	arg = 2.0 * PI / 20.0;
 	for (k = 0; k < N; k++) {
-		d[k] = signal_amp * sin(arg * k) + noise_amp * gaussian();
+		d[k] = signal_amp * _sin(arg * k) + noise_amp * gaussian();
 	}
 
 /* scale based on L */
