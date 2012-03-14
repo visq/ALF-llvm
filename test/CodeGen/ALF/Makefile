@@ -48,7 +48,10 @@ endif
 
 %.bin: %.c
 	gcc -g -DDEBUG $(CFLAGS) -o $@ -O2 $<
-
+%.host.s: %.ll
+	llc -o $@ $<
+%.bin: %.host.s
+	gcc -o $@ $<
 %.clean:
 	rm -f $(patsubst %.clean,%.bc,$@) $(patsubst %.clean,%.*.s,$@) $(patsubst %.clean,%.*.bin,$@)  $(patsubst %.clean,%.*.ff,$@) 
 
