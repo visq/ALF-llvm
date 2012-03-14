@@ -1,4 +1,4 @@
-//===-- ALFcpp - Library for converting LLVM code to ALF (Artist2 Language for Flow Analysis) --------------===//
+//===-- ALFWriter.cpp - Library for converting LLVM code to ALF (Artist2 Language for Flow Analysis) --------------===//
 //
 //                     Benedikt Huber, <benedikt@vmars.tuwien.ac.at>
 //                     Adapted from the C Backend (The LLVM Compiler Infrastructure)
@@ -48,17 +48,17 @@ void llvm::alf_fatal_error(const string& Reason, Instruction& Ins) {
         }
     }
     errs() << "[llvm2alf] At instruction"; Ins.print(errs()); errs () << "\n";
-    report_fatal_error("ALF Backend: "+ Reason);
+    report_fatal_error("[llvm2alf] Error: " + Reason);
 }
-
 
 void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Constant* Const) {
 
 	Type *Ty = Const->getType();
+    // Omit undef initializers (undefined is default)
 	if(isa<UndefValue>(Const)) {
-	    // Omit undef initializers
 	    return;
 	}
+	// Initializers for aggregate zeros
 	if(isa<ConstantAggregateZero>(Const)) {
 		if(SequentialType *SeqTy = dyn_cast<SequentialType>(Ty)) {
 			unsigned NumElems;
@@ -67,11 +67,11 @@ void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffse
 			} else if(const VectorType *VecTy = dyn_cast<VectorType>(SeqTy)) {
 				NumElems = VecTy->getNumElements();
 			} else {
-				report_fatal_error("Unexpected Constant Aggregate Zero for type different from Array or Vectory" + typeToString(*SeqTy));
+				report_fatal_error("Unexpected Constant Aggregate Zero for type different from Array or Vector: " + typeToString(*SeqTy));
 			}
 			for(unsigned Ix = 0; Ix < NumElems; Ix++) {
 				Constant* SubConstZero = Constant::getNullValue(SeqTy->getElementType());
-				emitInitializers(M,V,BitOffset + getBitOffset(SeqTy, Ix), SubConstZero);
+				emitInitializers(M, V, BitOffset + getBitOffset(SeqTy, Ix), SubConstZero);
 			}
 		} else if(StructType *StructTy = dyn_cast<StructType>(Ty)) {
 			unsigned Ix = 0;
@@ -80,20 +80,19 @@ void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffse
 				emitInitializers(M,V,BitOffset + getBitOffset(StructTy, Ix++), SubConstZero);
 			}
 		} else {
-			assert(0 && "Unknown composite type in emitInitializers for ConstantAggregateZero");
+		    report_fatal_error ("[llvm2alf] emitInitializers(): Unknown composite type for ConstantAggregateZero:" + typeToString(*Ty));
 		}
 		return;
     }
 
-    // Depending on the type: For array, vector and struct types,
-    // we need to initialize the corresponding elements.
     switch (Ty->getTypeID()) {
+    // Emit Integer Constant
     case Type::IntegerTyID: {
         assert(isa<ConstantInt>(Const) && "Integer Constant not of type ConstantInt?");
         emitInitializer(V, BitOffset, cast<ConstantInt>(Const));
         return;
     }
-	// this should be a constant expression pointing to null or some globally allocated data
+	// For pointer types, null, global values and constant expressions are supported
     case Type::PointerTyID: {
     	if(Const->isNullValue()) {
     		emitInitializer(V, BitOffset, ConstantPointerNull::get(cast<PointerType>(Const->getType())));
@@ -103,35 +102,36 @@ void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffse
     		if(hasSimpleInitializer(ConstExpr)) {
     			emitInitializer(V, BitOffset, ConstExpr);
     		} else {
-    	        report_fatal_error("emitIntializers(): Unsupported Constant Pointer Expression: " + valueToString(*ConstExpr));
+    	        report_fatal_error("[llvm2alf] emitIntializers(): Unsupported Constant Pointer Expression: " + valueToString(*ConstExpr));
     		}
     	} else if(isa<Function>(Const)) {
     		emitInitializer(V, BitOffset, cast<Function>(Const));
         } else if(isa<BlockAddress>(Const)) {
             emitInitializer(V, BitOffset, cast<BlockAddress>(Const));
         } else {
-    		report_fatal_error("emitIntializers(): Unsupported Pointer Constant: " + valueToString(*Const));
+    		report_fatal_error("[llvm2alf] emitIntializers(): Unsupported Pointer Constant: " + valueToString(*Const));
     	}
     	return;
     }
+    // For vectors, emit initializer for every element
     case Type::VectorTyID: {
-        // Emit initializer for every element
         assert(isa<ConstantVector>(Const) && "Non-Zero Vector Constant not of type ConstantVector?");
         emitCompositeInitializers(M,V,BitOffset,cast<ConstantVector>(Const));
         return;
     }
+    // For arrays, emit initializer for every element
     case Type::ArrayTyID: {
-        // Emit Initializer for every element
         assert(isa<ConstantArray>(Const) && "Non-Zero Array Constant not of type ConstantArray?");
         emitCompositeInitializers(M,V,BitOffset,cast<ConstantArray>(Const));
         return;
     }
+    // For struct, emit initializer for every element
     case Type::StructTyID: {
-    	// Emit Initializer for every element
         assert(isa<ConstantStruct>(Const) && "Non-Zero Struct Constant not of type ConstantStruct?");
         emitStructInitializers(M,V,BitOffset,cast<ConstantStruct>(Const));
         return;
     }
+    // For floating point types, we only support constant values
     case Type::FloatTyID:       // 32 bit floating point type
     case Type::DoubleTyID:      // 64 bit floating point type
     case Type::X86_FP80TyID:    // 80 bit floating point type (X87)
@@ -142,11 +142,13 @@ void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffse
         emitInitializer(V, BitOffset, cast<ConstantFP>(Const));
         return;
     }
-    case Type::FunctionTyID: {
-        report_fatal_error("emitIntializers(): Functions are not yet supported. Type: " + typeToString(*Ty));
-    }
+    // Function constants do not make sense
+    case Type::FunctionTyID:
+        report_fatal_error("[llvm2alf] emitIntializers(): Unsupported constant of function type " + typeToString(*Ty));
+        break;
     default:
-        report_fatal_error("emitIntializers(): Unsupported Type: " + typeToString(*Ty));
+        report_fatal_error("[llvm2alf] emitIntializers(): Unsupported Type: " + typeToString(*Ty));
+        break;
     }
     assert(0 && "llvm_unreachable");
 }
@@ -176,7 +178,7 @@ void ALFWriter::emitInitializer(GlobalVariable& V, unsigned BitOffset, Constant*
 	ALF_DEBUG(dbgs() << "emitInitializer: " << valueToString(V) << "[offset=" << utostr(BitOffset)
 			         << "] <- " << valueToString(*Const) << "\n");
 
-	/* no need to emit undefined initializers (e.g. padding generated by clang */
+	// no need to emit undefined initializers (e.g., padding generated by clang)
 	if(isa<UndefValue>(Const)) return;
 
 	std::string ref = getValueName(&V);
@@ -187,7 +189,6 @@ void ALFWriter::emitInitializer(GlobalVariable& V, unsigned BitOffset, Constant*
     emitConstant(Const);
 
     // There is no notion of a volatile *variable* in LLVM
-    // if(Volatile) atom("volatile");
     if(ReadOnly) Output.atom("read_only");
 
     Output.endList("init");
@@ -209,81 +210,78 @@ void ALFWriter::emitConstant(Constant *CPV) {
 
 	} else if(ConstantFP *CFP = dyn_cast<ConstantFP>(CPV)) {
 		emitFloatNumVal(CFP->getType(), CFP->getValueAPF());
-
-    /// Emit a null pointer constant.
-	// Might be obvious, but keep in mind that a null pointer is not an
-	// undefined value, but needs to be comparable to other pointers.
-	//    int *x = 0, y = 5, z = 2;
-	//    if(x == 0)  x = &z;
-	//    if(x != &y) x = &y;
-	//    if(x == 0) *x = 3;  /* segfault */
-	//    if(x == 0)  y = *x; /* segfault */
-	// Currently implemented as frameref "mem@00000000"
     } else if(isa<ConstantPointerNull>(CPV)) {
+        // Emit a null pointer constant.
+        // Might be obvious, but keep in mind that a null pointer is not an
+        // undefined value, but needs to be comparable to other pointers.
+        //    int *x = 0, y = 5, z = 2;
+        //    if(x == 0)  x = &z;
+        //    if(x != &y) x = &y;
+        //    if(x == 0) *x = 3;  /* segfault */
+        //    if(x == 0)  y = *x; /* segfault */
+        // Currently implemented as frameref "mem@00000000"
 		Output.address(NULL_REF, 0);
 	} else if(BlockAddress *CBA = dyn_cast<BlockAddress>(CPV)) {
 	    BasicBlock *BB = CBA->getBasicBlock();
 	    Output.label(getBasicBlockLabel(BB), 0);
 	} else if(ConstantAggregateZero *CAZ = dyn_cast<ConstantAggregateZero>(CPV)) {
-		report_fatal_error("LLVM -> ALF: unsupported ConstantAggregateZero constant (0 for aggregates). "
-				"Type: " + typeToString(*CAZ->getType()));
+		report_fatal_error("[llvm2alf] emitConstant(): unsupported ConstantAggregateZero. "
+				           "Type: " + typeToString(*CAZ->getType()));
 	} else if(ConstantArray *CA = dyn_cast<ConstantArray>(CPV)) {
-		report_fatal_error("LLVM -> ALF: unsupported ConstantArray constant. "
-				"Type: " + typeToString(*CA->getType()));
+		report_fatal_error("[llvm2alf] emitConstant(): unsupported ConstantArray. "
+				           "Type: " + typeToString(*CA->getType()));
 	} else if(ConstantStruct *CS = dyn_cast<ConstantStruct>(CPV)) {
-		report_fatal_error("LLVM -> ALF: unsupported ConstantStruct constant. "
-				"Type: " + typeToString(*CS->getType()));
+		report_fatal_error("[llvm2alf] emitConstant(): unsupported ConstantStruct. "
+				            "Type: " + typeToString(*CS->getType()));
 	} else if(ConstantVector *CV = dyn_cast<ConstantVector>(CPV)) {
-		report_fatal_error("LLVM -> ALF: unsupported ConstantVector constant. "
-				"Type: " + typeToString(*CV->getType()));
+		report_fatal_error("[llvm2alf] emitConstant(): unsupported ConstantVector. "
+				            "Type: " + typeToString(*CV->getType()));
 	} else {
-		report_fatal_error("LLVM -> ALF: unknown constant expressions of type: " + typeToString(*CPV->getType()));
+		report_fatal_error("[llvm2alf] unknown constant expressions of type: " + typeToString(*CPV->getType()));
 	}
 }
 
 void ALFWriter::emitGlobalValue(const GlobalValue *GV, uint64_t Offset) {
 
-	ALF_DEBUG(dbgs() << "LLVM -> ALF: Global Value Constant (label or address): " << valueToString(*GV) << "\n");
+	ALF_DEBUG(dbgs() << "[llvm2alf] Global Value Constant (label or address): " << valueToString(*GV) << "\n");
 
 	if(const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GV)) {
 		Output.address(getValueName(GVar), Offset);
 	} else if(const Function *FVar = dyn_cast<Function>(GV)) {
 		Output.label(getValueName(FVar), Offset);
 	} else {
-		report_fatal_error("LLVM -> ALF: emitGlobalValue: Unsupported Global Value Type: " + valueToString(*GV));
+		report_fatal_error("[llvm2alf] emitGlobalValue: Unsupported Global Value Type: " + valueToString(*GV));
 	}
 }
 
-
-// emit LABEL and ARG_DECLS of {func LABEL ARG_DECLS SCOPE}
-// XXX: Is it neccessary to qualify the function label?
-void ALFWriter::emitFunctionSignature(const Function *F, bool Prototype) {
-  // Ignoring calling conventions and linkage
+// emit function signature {func LABEL ARG_DECLS SCOPE}
+void ALFWriter::emitFunctionSignature(const Function *F) {
+  // XXX: Ignoring calling conventions and linkage
 
   // Loop over the arguments, printing them...
   const FunctionType *FT = cast<FunctionType>(F->getFunctionType());
   const AttrListPtr &PAL = F->getAttributes();
 
-  // Print out the name...
+  // Emit name
   Output.label(getValueName(F), 0);
 
+  // Emit formal parameters
   Output.startList("arg_decls");
-
   if (!F->arg_empty()) {
       Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end();
       unsigned Idx = 1;
 
       std::string ArgName;
       for (; I != E; ++I) {
-          if (I->hasName() || !Prototype) {
-              ArgName = getValueName(I);
+          std::string ArgName;
+          if (! I->hasName()) {
+              ArgName = "__unused__" + utostr(Idx);
           } else {
-              errs() << "LLVM2ALF Warning: Unnamed formal parameter (potential error)\n";
-              ArgName = "__anonymous_formal_parameter__" + Idx;
+              ArgName = getValueName(I);
           }
           Type *ArgTy = I->getType();
           if (PAL.paramHasAttr(Idx, Attribute::ByVal)) {
-              errs() << "LLVM2Alf Error: ByVal parameters not yet supported: ";PAL.dump();
+              errs() << "[llvm2alf] Warning: ByVal parameter does not conform to C interface" << typeToString(*FT) << "\n";
           }
           unsigned size = getBitWidth(ArgTy); // in bits
           Output.alloc(ArgName, size);
@@ -292,7 +290,7 @@ void ALFWriter::emitFunctionSignature(const Function *F, bool Prototype) {
   }
   Output.endList("arg_decls");
   if (FT->isVarArg()) {
-    errs() << "LLVM2ALF: We do not support varargs yet: ";FT->dump();
+    report_fatal_error("[llvm2alf] emitFunctionSignature(): varargs are not supported");
   }
 }
 
@@ -300,14 +298,10 @@ void ALFWriter::emitFunctionSignature(const Function *F, bool Prototype) {
 //                        ALF Statement visitors
 //===----------------------------------------------------------------------===//
 
-// Specific Instruction type classes... note that all of the casts are
-// necessary because we use the instruction classes as opaque types...
-//
 void ALFWriter::visitReturnInst(ReturnInst &I) {
-  // If this is a struct return function, return the temporary struct.
-  bool isStructReturn = I.getParent()->getParent()->hasStructRetAttr();
 
-  // TODO: support struct return
+  // TODO: struct return
+  bool isStructReturn = I.getParent()->getParent()->hasStructRetAttr();
   if (isStructReturn) {
       alf_fatal_error("struct return not yet supported", I);
   }
@@ -393,76 +387,6 @@ void ALFWriter::visitStoreInst(StoreInst &I) {
 }
 
 
-void ALFWriter::visitInsertElementInst(InsertElementInst &I) {
-  alf_fatal_error("unsupported: visitInsertElementInst", I);
-//  const Type *EltTy = I.getType()->getElementType();
-//  emitOperand(I.getOperand(0));
-//  Out << ";\n  ";
-//  Out << "((";
-//  printType(Out, PointerType::getUnqual(EltTy));
-//  Out << ")(&" << getValueName(&I) << "))[";
-//  emitOperand(I.getOperand(2));
-//  Out << "] = (";
-//  emitOperand(I.getOperand(1));
-//  Out << ")";
-}
-
-void ALFWriter::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
-    alf_fatal_error("unsupported: visitShuffleVectorInst", SVI);
-//  Out << "(";
-//  printType(Out, SVI.getType());
-//  Out << "){ ";
-//  const VectorType *VT = SVI.getType();
-//  unsigned NumElts = VT->getNumElements();
-//  Type *EltTy = VT->getElementType();
-//
-//  for (unsigned i = 0; i != NumElts; ++i) {
-//    if (i) Out << ", ";
-//    int SrcVal = SVI.getMaskValue(i);
-//    if ((unsigned)SrcVal >= NumElts*2) {
-//      Out << " 0/*undef*/ ";
-//    } else {
-//      Value *Op = SVI.getOperand((unsigned)SrcVal >= NumElts);
-//      if (isa<Instruction>(Op)) {
-//        // Do an extractelement of this value from the appropriate input.
-//        Out << "((";
-//        printType(Out, PointerType::getUnqual(EltTy));
-//        Out << ")(&" << getValueName(Op)
-//            << "))[" << (SrcVal & (NumElts-1)) << "]";
-//      } else if (isa<ConstantAggregateZero>(Op) || isa<UndefValue>(Op)) {
-//        Out << "0";
-//      } else {
-//        printConstant(cast<ConstantVector>(Op)->getOperand(SrcVal &
-//                                                           (NumElts-1)),
-//                      false);
-//      }
-//    }
-//  }
-//  Out << "}";
-}
-
-void ALFWriter::visitInsertValueInst(InsertValueInst &IVI) {
-    alf_fatal_error("unsupported: visitInsertValueInst", IVI);
-  // Start by copying the entire aggregate value into the result variable.
-//  emitOperand(IVI.getOperand(0));
-//  Out << ";\n  ";
-//
-//  // Then do the insert to update the field.
-//  Out << getValueName(&IVI);
-//  for (const unsigned *b = IVI.idx_begin(), *i = b, *e = IVI.idx_end();
-//       i != e; ++i) {
-//    Type *IndexedTy =
-//      ExtractValueInst::getIndexedType(IVI.getOperand(0)->getType(), b, i+1);
-//    if (IndexedTy->isArrayTy())
-//      Out << ".array[" << *i << "]";
-//    else
-//      Out << ".field" << *i;
-//  }
-//  Out << " = ";
-//  emitOperand(IVI.getOperand(1));
-}
-
-
 void ALFWriter::visitCallInst(CallInst &I) {
   if (isa<InlineAsm>(I.getCalledValue()))
     return visitInlineAsm(I);
@@ -519,12 +443,15 @@ void ALFWriter::visitCallInst(CallInst &I) {
   for (; AI != AE; ++AI, ++ArgNo) {
     if (ArgNo < NumDeclaredParams &&
         (*AI)->getType() != FTy->getParamType(ArgNo)) {
-      errs() << "[llvm2alf] Mismatch in Parameter " << ArgNo << " of "; I.dump();
-      alf_fatal_error("coercion of function parameters is not supported",I);
+      errs() << "[llvm2alf] Mismatch in Parameter " << ArgNo << "\n";
+      alf_fatal_error("coercion of function parameters is not supported", I);
     }
     // Check if the argument is expected to be passed by value.
     if (I.paramHasAttr(ArgNo+1, Attribute::ByVal)) {
-        alf_fatal_error("passing structs by value is not supported yet",I);
+        // This has no direct consequence for ALF code generation, but may lead
+        // to problems when a caller uses the C interface
+        errs() << "[llvm2alf] Warning: Pointer argument was declared as ByVal parameter of "
+                  "type " << typeToString(*(*AI)->getType()) << "\n";
     }
     emitOperand(*AI);
   }
@@ -714,7 +641,7 @@ void ALFWriter::visitBinaryOperator(Instruction &I) {
 
   } else if (I.getOpcode() == Instruction::FRem) {
     // TODO: output a call to fmod/fmodf instead of emitting a%b
-    errs() << "LLVM -> ALF: frem is not yet supported\n";
+    errs() << "[llvm2alf]: frem is not yet supported\n";
     Output.undefined(getBitWidth(I.getType()));
   } else {
 
@@ -913,83 +840,20 @@ void ALFWriter::visitFCmpInst(FCmpInst &I) {
 void ALFWriter::visitGetElementPtrInst(GetElementPtrInst &GepIns) {
 
 	Value *Ptr = GepIns.getPointerOperand();
-	gep_type_iterator I = gep_type_begin(GepIns), E = gep_type_end(GepIns);
+	gep_type_iterator S = gep_type_begin(GepIns), E = gep_type_end(GepIns);
 
-	// If there are no indices, just emit the operand
-	if (I == E) {
-		emitOperand(Ptr);
-		return;
-	}
-
-	// Find out if the last index is into a vector.  If so, we have to print this
-	// specially.  Since vectors can't have elements of indexable type, only the
-	// last index could possibly be of a vector element.
-	const VectorType *LastIndexIsVector = 0;
-	{
-		for (gep_type_iterator TmpI = I; TmpI != E; ++TmpI)
-			LastIndexIsVector = dyn_cast<VectorType>(*TmpI);
-	}
-
-	if (LastIndexIsVector) {
-        errs() << "[llvm2alf] GEP where last index is vector (not supported yet): " << valueToString(GepIns)
-               << "\n";
-		Output.undefined(getBitWidth(*E));
-		return;
-	}
-
-	// If the first index is 0, we can directly manipulate the address 'Ptr'.
-	// XXX: We can simply skip leading 0 indices in ALF, right?
-	Value *FirstOp = I.getOperand();
-	if (isa<Constant>(FirstOp) && cast<Constant>(FirstOp)->isNullValue()) {
-		++I;  // Skip the zero index.
-	}
-
-	gep_type_iterator S = I;
 	unsigned BitWidth =  getBitWidth(Ptr->getType());
 	assert(BitWidth == TD->getPointerSizeInBits() && "bad pointer bit width");
 
-	// FIXME: Take alignment and attributes into account
-	// GEP corresponds to address arithmetic
-	// Pass 1: Open add expressions
-	for (I = S; I != E; ++I) {
-		Output.startList("add",false); // Add to address
-		Output.atom(BitWidth);
-	}
-	// Emit Operand (First argument to innermost add, if any)
-	emitOperand(Ptr);
+	SmallVector<std::pair<Value*, uint64_t>, 4> Offsets;
 
-	// Pass 2: Close add expressions
-	for (I = S; I != E; ++I) {
-
-		// For struct types, we need to compute the _constant_ offset of the struct element
-		if ((*I)->isStructTy()) {
-			StructType* STy = dyn_cast<StructType>(*I);
-			ConstantInt* EIxConst = cast<ConstantInt>(I.getOperand());
-			uint64_t EIx = EIxConst->getLimitedValue(UINT_MAX);
-			Output.offset(TD->getStructLayout(STy)->getElementOffsetInBits(EIx));
-		} else if ((*I)->isArrayTy() || (*I)->isPointerTy()) {
-			// No alignment taken into account
-			Type* IndexType = IntegerType::get(Ptr->getContext(), BitWidth);
-			unsigned ElementBitWidth = TD->getTypeAllocSize(cast<SequentialType>(*I)->getElementType()) * 8;
-			if(ConstantInt* EIxConst = dyn_cast<ConstantInt>(I.getOperand())) {
-				uint64_t EIx = EIxConst->getLimitedValue(UINT_MAX);
-				Output.offset(EIx * ElementBitWidth);
-			} else {
-				Constant* IndexMultiplier = ConstantInt::get(IndexType, bitsToLAU(ElementBitWidth), false);
-				emitMultiplication(BitWidth,I.getOperand(), IndexMultiplier);
-				// XXX: Do we need to free the IndexMultiplier ??
-			}
-		} else if ((*I)->isVectorTy()) {
-			errs() << "LLVM -> ALF: GEP: Vector Type unsupported\n";
-			Output.undefined(getBitWidth(*I));
-		} else {
-			errs() << "LLVM -> ALF: Unsupported type in GEP: ";(*I)->dump();
-			Output.undefined(getBitWidth(*I));
-		}
-		Output.dec_unsigned(1,0); // No carry bit
-		Output.endList("add"); // Close add expression
-	}
-
+    // Pointer arithmetic
+    for (gep_type_iterator I = S; I != E; ++I) {
+        if (isa<Constant>(I.getOperand()) && cast<Constant>(I.getOperand())->isNullValue())
+            continue;
+        Offsets.push_back(getBitOffset(cast<CompositeType>(*I), I.getOperand()));
+    }
+    emitPointer(Ptr, Offsets);
 }
 
 /// FIXME: alignment issues are ignored for now
@@ -1016,28 +880,98 @@ void ALFWriter::visitExtractElementInst(ExtractElementInst &I) {
 //  Out << "]";
 }
 
-void ALFWriter::visitExtractValueInst(ExtractValueInst &EVI) {
-    alf_fatal_error("unsupported: visitExtractValueInst", EVI);
-//  Out << "(";
-//  if (isa<UndefValue>(EVI.getOperand(0))) {
-//    Out << "(";
-//    printType(Out, EVI.getType());
-//    Out << ") 0/*UNDEF*/";
-//  } else {
-//    Out << getValueName(EVI.getOperand(0));
-//    for (const unsigned *b = EVI.idx_begin(), *i = b, *e = EVI.idx_end();
-//         i != e; ++i) {
-//      Type *IndexedTy =
-//        ExtractValueInst::getIndexedType(EVI.getOperand(0)->getType(), b, i+1);
-//      if (IndexedTy->isArrayTy())
-//        Out << ".array[" << *i << "]";
-//      else
-//        Out << ".field" << *i;
-//    }
-//  }
+
+void ALFWriter::visitInsertElementInst(InsertElementInst &I) {
+  alf_fatal_error("unsupported: visitInsertElementInst", I);
+//  const Type *EltTy = I.getType()->getElementType();
+//  emitOperand(I.getOperand(0));
+//  Out << ";\n  ";
+//  Out << "((";
+//  printType(Out, PointerType::getUnqual(EltTy));
+//  Out << ")(&" << getValueName(&I) << "))[";
+//  emitOperand(I.getOperand(2));
+//  Out << "] = (";
+//  emitOperand(I.getOperand(1));
 //  Out << ")";
 }
 
+void ALFWriter::visitExtractValueInst(ExtractValueInst &EVI) {
+
+    uint64_t BitOffset = 0;
+    {
+        Type *OpTy = EVI.getAggregateOperand()->getType();
+        for (ExtractValueInst::idx_iterator I = EVI.idx_begin(), E = EVI.idx_end(); I!=E; ++I) {
+            CompositeType *Agg = cast<CompositeType>(OpTy);
+            BitOffset += getBitOffset(Agg, *I);
+            OpTy = Agg->getTypeAtIndex(*I);
+        }
+    }
+    // Extract from BitOffset to BitOffset + Size - 1
+    Output.startList("select");
+    Output.atom(getBitWidth(EVI.getAggregateOperand()->getType()));
+    Output.atom(BitOffset);
+    Output.atom(BitOffset + getBitWidth(EVI.getType()) - 1);
+    emitOperand(EVI.getAggregateOperand());
+    Output.endList("select");
+}
+
+
+void ALFWriter::visitInsertValueInst(InsertValueInst &IVI) {
+
+    errs() << "unsupported: visitInsertValueInst\n";
+    Output.undefined(getBitWidth(IVI.getType()));
+  // Start by copying the entire aggregate value into the result variable.
+//  emitOperand(IVI.getOperand(0));
+//  Out << ";\n  ";
+//
+//  // Then do the insert to update the field.
+//  Out << getValueName(&IVI);
+//  for (const unsigned *b = IVI.idx_begin(), *i = b, *e = IVI.idx_end();
+//       i != e; ++i) {
+//    Type *IndexedTy =
+//      ExtractValueInst::getIndexedType(IVI.getOperand(0)->getType(), b, i+1);
+//    if (IndexedTy->isArrayTy())
+//      Out << ".array[" << *i << "]";
+//    else
+//      Out << ".field" << *i;
+//  }
+//  Out << " = ";
+//  emitOperand(IVI.getOperand(1));
+}
+
+void ALFWriter::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
+    alf_fatal_error("unsupported: visitShuffleVectorInst", SVI);
+//  Out << "(";
+//  printType(Out, SVI.getType());
+//  Out << "){ ";
+//  const VectorType *VT = SVI.getType();
+//  unsigned NumElts = VT->getNumElements();
+//  Type *EltTy = VT->getElementType();
+//
+//  for (unsigned i = 0; i != NumElts; ++i) {
+//    if (i) Out << ", ";
+//    int SrcVal = SVI.getMaskValue(i);
+//    if ((unsigned)SrcVal >= NumElts*2) {
+//      Out << " 0/*undef*/ ";
+//    } else {
+//      Value *Op = SVI.getOperand((unsigned)SrcVal >= NumElts);
+//      if (isa<Instruction>(Op)) {
+//        // Do an extractelement of this value from the appropriate input.
+//        Out << "((";
+//        printType(Out, PointerType::getUnqual(EltTy));
+//        Out << ")(&" << getValueName(Op)
+//            << "))[" << (SrcVal & (NumElts-1)) << "]";
+//      } else if (isa<ConstantAggregateZero>(Op) || isa<UndefValue>(Op)) {
+//        Out << "0";
+//      } else {
+//        printConstant(cast<ConstantVector>(Op)->getOperand(SrcVal &
+//                                                           (NumElts-1)),
+//                      false);
+//      }
+//    }
+//  }
+//  Out << "}";
+}
 
 void ALFWriter::visitCastInst(CastInst &I) {
 
@@ -1172,10 +1106,8 @@ void ALFWriter::emitUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
 
 
 
-/*
- * Emit switch statement. The phi variables are now set in an extra basic block inserted
- * between the predecessors and sucessor.
- */
+// Emit switch statement. The phi variables are now set in an extra basic block inserted
+// between the predecessors and sucessor.
 void ALFWriter::emitSwitch(TerminatorInst& SI,
 		                   Value* Condition,
 		                   const CaseVector& Cases,
@@ -1252,10 +1184,9 @@ void ALFWriter::setPHICopiesForSuccessor (BasicBlock *PredBlock, BasicBlock *Suc
 //  - ptr2ptr:    (global, k) -> (global, k)
 //  - ptr +- ptr: (g1,k1) -> (g1,k2) -> (g1, k1+-k2)
 //  - int`op`int: (_, i1) -> (_, i2) -> i1 `op` i2
-
 void ALFWriter::emitConstantExpression(const ConstantExpr* CE) {
 
-	ALF_DEBUG(dbgs() << "LLVM -> ALF: Emmitting constant expression: " << *CE << "\n");
+	ALF_DEBUG(dbgs() << "[llvm2alf]: Emmitting constant expression: " << *CE << "\n");
 
 	std::auto_ptr<ALFConstant> FoldedConstant = foldConstant(CE);
 
@@ -1458,11 +1389,9 @@ std::auto_ptr<ALFConstant> ALFWriter::foldBinaryConstantExpression(const Constan
 
 
 // Constant Pointers ~ compile-time address arithmetic
-// TODO: some code duplication from emitGEPExpression. Combine the code for both,
-// so we have also have constant folding in the general case
 uint64_t ALFWriter::getConstantPointerOffset(const ConstantExpr* CE) {
 
-	assert(CE->getOpcode() == Instruction::GetElementPtr && "LLVM->ALF: emitConstantPointer: Not a GEP ins");
+	assert(CE->getOpcode() == Instruction::GetElementPtr && "[llvm2alf]: getConstantPointerOffset(): Not a GEP expression");
 
 	uint64_t BitOffset = 0;
 
@@ -1470,19 +1399,66 @@ uint64_t ALFWriter::getConstantPointerOffset(const ConstantExpr* CE) {
 	for (gep_type_iterator I = gep_type_begin(CE), E = gep_type_end(CE); I != E; ++I) {
 
 		assert(isa<CompositeType>(*I) && "getConstantPointerOffset: not a composite type");
-		if(ConstantInt* EIxConst = dyn_cast<ConstantInt>(I.getOperand())) {
-			uint64_t EIx = EIxConst->getLimitedValue(UINT64_MAX);
-			BitOffset += getBitOffset(cast<CompositeType>(*I),EIx);
+		if(ConstantInt* EIx = dyn_cast<ConstantInt>(I.getOperand())) {
+			BitOffset += getBitOffset(cast<CompositeType>(*I),EIx->getLimitedValue());
 		} else {
-			report_fatal_error("LLVM->ALF: Non constant index for composite type in constant GEP expression: " +
-					valueToString(*I.getOperand()));
+			report_fatal_error("[llvm2alf] getConstantPointerOffset: Non constant index for composite type "
+			                   "in constant GEP expression: " + valueToString(*I.getOperand()));
 		}
 	}
 
 	return BitOffset;
 }
 
+// Pointers and run-time address arithmetic
+void ALFWriter::emitPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, uint64_t> >& Offsets)
+{
+    // Pass 1: Fold constants
+    int PtrBitWidth = getBitWidth(Ptr->getType());
+    uint64_t ConstantOffset = 0;
+    SmallVector<std::pair<Value*, uint64_t>, 4> DynamicOffsets;
+    for (SmallVectorImpl<std::pair<Value*, uint64_t> >::iterator I = Offsets.begin(), E = Offsets.end();
+         I != E; ++I) {
+        if (! I->first) {
+            ConstantOffset += I->second;
+        } else if( ConstantInt* EIx = dyn_cast<ConstantInt>(I->first)) {
+            ConstantOffset += EIx->getLimitedValue() * I->second;
+        } else {
+            DynamicOffsets.push_back(*I);
+        }
+    }
+    // Pass 1: Open add expressions
+    for (unsigned I = 0; I < DynamicOffsets.size(); I++) {
+        Output.startList("add",false); // Add to address
+        Output.atom(PtrBitWidth);
+    }
 
+    // Emit Operand (First argument to innermost add, if any)
+    emitPointer(Ptr, ConstantOffset);
+
+    // Pass 2: Close add expressions
+    for (SmallVectorImpl<std::pair<Value*, uint64_t> >::iterator I = DynamicOffsets.begin(), E = DynamicOffsets.end();
+         I != E; ++I) {
+        Type* IndexType = IntegerType::get(Ptr->getContext(), PtrBitWidth);
+        Constant* IndexMultiplier = ConstantInt::get(IndexType, bitsToLAU(I->second), false);
+        emitMultiplication(PtrBitWidth, I->first, IndexMultiplier);
+        Output.dec_unsigned(1,0); // No carry bit
+        Output.endList("add"); // Close add expression
+    }
+}
+
+void ALFWriter::emitPointer(Value *Operand, uint64_t Offset) {
+    // Pass 1: Open add expressions
+    // assert(Operand->getType()->isPointerTy() && "emitPointer: not a pointer type");
+
+    // Emit Operand (First argument to innermost add, if any)
+    Output.startList("add",false); // Add to address
+    Output.atom(getBitWidth(Operand->getType()));
+    emitOperand(Operand);
+    Output.offset(Offset);
+    Output.dec_unsigned(1,0); // No carry bit
+    Output.endList("add"); // Close add expression
+}
 // TODO: is it ok to emulate LLVM multiplication this way?
 // FIXME: support nsw flags etc.
 void ALFWriter::emitMultiplication(unsigned BitWidth, Value* Op1, Value* Op2) {
@@ -1641,27 +1617,38 @@ std::string ALFWriter::getAnonValueName(const Value* Operand) {
 
 /// ALF name for volatile storage of the given type
 std::string ALFWriter::getVolatileStorage(Type* Ty) {
-	// return "$volatile_" + utostr(TD->getTypeSizeInBits(Ty));
 	return "$volatile_" + utostr(getBitWidth(Ty));
 }
 
-unsigned ALFWriter::getBitOffset(CompositeType* Ty, unsigned Index) {
+uint64_t ALFWriter::getBitOffset(CompositeType* Ty, uint64_t Index) {
 
 	if(StructType *StrucTy = dyn_cast<StructType>(Ty)) {
 		return TD->getStructLayout(StrucTy)->getElementOffsetInBits(Index);
 	} else if(const SequentialType *SeqTy = dyn_cast<SequentialType>(Ty)) {
 		return TD->getTypeAllocSize(SeqTy->getElementType()) * Index * 8;
 	} else {
-		assert(0 && "getBitOffset: CompositeType which is neither struct nor sequential");
-		return 0;
+		report_fatal_error ("[llvm2alf] getBitOffset: CompositeType which is neither struct nor sequential");
 	}
 }
 
-//This converts the llvm constraint string to something gcc is expecting.
-//TODO: work out platform independent constraints and factor those out
-//      of the per target tables
-//      handle multiple constraint codes
-std::string ALFWriter::InterpretASMConstraint(InlineAsm::ConstraintInfo& c) {
+std::pair<Value*, uint64_t> ALFWriter::getBitOffset(CompositeType* Ty, Value* Index) {
+
+    if (ConstantInt* CI = dyn_cast<ConstantInt>(Index)) {
+        uint64_t Offset = getBitOffset(Ty, CI->getLimitedValue());
+        return std::make_pair((Value*)0, Offset);
+    } else if(const SequentialType *SeqTy = dyn_cast<SequentialType>(Ty)) {
+        // Sequential types: offset is index times element size
+        unsigned ElementBitWidth = TD->getTypeAllocSize(SeqTy->getElementType()) * 8;
+        return std::make_pair(Index, ElementBitWidth);
+    } else {
+        report_fatal_error ("[llvm2alf] visitGetElementPtrInst: Unexpected/Unsupported type in address arithmetic");
+    }
+}
+
+
+// This converts the llvm constraint string to something gcc is expecting.
+// TODO: currently unused
+std::string ALFWriter::interpretASMConstraint(InlineAsm::ConstraintInfo& c) {
   assert(c.Codes.size() == 1 && "Too many asm constraint codes to handle");
 
   const char *const *table = TAsm->getAsmCBE();
