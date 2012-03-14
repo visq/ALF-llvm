@@ -80,18 +80,21 @@ std::string valueToString(const Value& V) {
 }
 
 /// Convert a type into a String (for debugging purposes)
-std::string typeToString(Type& T) {
+std::string typeToString(const Type& T) {
 	std::string s;
 	raw_string_ostream os(s);
 	T.print(os);
 	return os.str();
 }
 
-}
+} /* end anonymous namespace */
 
 namespace llvm {
 
   /// Report a fatal error with debugging information included
+  LLVM_ATTRIBUTE_NORETURN void alf_fatal_error(const string& Reason, Instruction& Ins);
+
+  /// Report a fatal error for a
   LLVM_ATTRIBUTE_NORETURN void alf_fatal_error(const string& Reason, Instruction& Ins);
 
   /// Specification of areas of memory which are addressed using absolute addresses
@@ -209,15 +212,19 @@ namespace llvm {
     }
 
     /// emit the signature for a function
-    void emitFunctionSignature(const Function *F, bool Prototype);
+    void emitFunctionSignature(const Function *F);
 
     // Temporary Store
     void emitTemporaryStore(Instruction *I);
 
-    // Emit Initializers
+    /// Emit initializers (zero or more) for the specified global variable
     void emitInitializers(Module &M, GlobalVariable &V,unsigned BitOffset, Constant* C);
+
+    /// Emit initializers for a vector or array type
     template<typename Const>
     void emitCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Const* C);
+
+    /// Emit initializers for a struct type
     void emitStructInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantStruct* Const);
 
     /// Check whether ConstantExpr can be initialized using a single ALF initializer entry
@@ -237,7 +244,7 @@ namespace llvm {
     	return true;
     }
 
-    /// Emit a (atomic) intializer statement for ALF (Precondition hasSimpleInitializer(Const))
+    /// Emit a (atomic) initializer statement for ALF
     void emitInitializer(GlobalVariable &V, unsigned BitOffset, Constant* C);
 
     //  Constants
@@ -303,8 +310,10 @@ namespace llvm {
     void emitFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instruction::CastOps op);
 
     void emitMultiplication(unsigned BitWidth, Value* Op1, Value* Op2);
+    void emitPointer(Value *Ptr, uint64_t Offset);
+    void emitPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, uint64_t> >& Offsets);
 
-    std::string InterpretASMConstraint(InlineAsm::ConstraintInfo& c);
+    std::string interpretASMConstraint(InlineAsm::ConstraintInfo& c);
 
     /// isExpressionInst - Check whether the instruction corresponds
     ///  to an ALF expression, not an ALF statement.
@@ -414,8 +423,11 @@ namespace llvm {
     /// ALF name for volatile storage of the given type
     std::string getVolatileStorage(Type* Ty);
 
-    /// Get bit offset of subtype i of a composite type
-    unsigned getBitOffset(CompositeType* Ty, unsigned Index);
+    /// Get bit offset of subtype at Index of a composite type
+    uint64_t getBitOffset(CompositeType* Ty, uint64_t Index);
+
+    /// Get bit offset (Ins,C) interpreted C * valueOf(Ins) of subtype at Index of a composite type
+    std::pair<Value*, uint64_t> getBitOffset(CompositeType* Ty, Value* Index);
 
     /// Get number of bits needed to represent the given type in the ALF memory model
     /// Uses TargetData TD to support platfrom-specific behavior

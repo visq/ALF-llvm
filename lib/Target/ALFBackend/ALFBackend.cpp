@@ -21,7 +21,11 @@
 //
 // TODO: Support for vector types
 //
+// TODO: Support {extract,insert}value
+//
 // TODO: Support more intrinsics
+//
+// TODO: Support struct return and byval parameters
 //
 // FIXME: We cannot handle weak and common linkage
 //
@@ -509,7 +513,7 @@ bool ALFBackend::doInitialization(Module &M) {
 		  Output.newline();
 		  Output.comment("-------------------- STUB FOR UNDEFINED FUNCTION " + F->getNameStr() + " --------------------");
 		  Output.startList("func");
-		  Writer.emitFunctionSignature(F, false);
+		  Writer.emitFunctionSignature(F);
 		  Output.startList("scope");
 		  Output.startList("decls"); Output.endList("decls");
 		  Output.startList("inits"); Output.endList("inits");
@@ -549,7 +553,7 @@ void ALFBackend::visitFunction(Function &F) {
   Output.comment("-------------------- FUNCTION " + F.getNameStr() + " --------------------");
   Output.startList("func");
 
-  Writer.emitFunctionSignature(&F, false);
+  Writer.emitFunctionSignature(&F);
 
   // start function scope
   Output.startList("scope"); // DECLS INITS STMTS
