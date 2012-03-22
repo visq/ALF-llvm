@@ -44,7 +44,7 @@ You need git (the version control system).
     git fetch forge
 
     # [llvm/] checkout the alf branch from forge
-    git checkout remotes/forge/alf -b alf
+    git checkout remotes/forge/alf_release_30 -b alf_release_30
 
     # [llvm/] clone clang (C/C++ frontend)
     cd tools
@@ -66,14 +66,14 @@ Building
 To build llvm (and clang), type
 
     # [llvm/] configure and build LLVM
-    ./configure && make
+    ./configure --enable-assertions && make
 
 Setting things up
 -----------------
 
 Add the LLVM binaries to your PATH environment variable.
  
-    export PATH=<path-to-llvm>/Debug/bin:${PATH}
+    export PATH=<path-to-llvm>/Debug+Asserts/bin:${PATH}
 
 You need to use a frontend to obtain LLVM bitcode. Here is the recommended way 
 to translate C to bitcode using clang. Note that 4 standard transformations
@@ -123,15 +123,10 @@ When analyzing the ALF modules using SWEET, you need to specify the entry point.
 
     sweet -i=test.alf func=main -ae ffg=ub vola=t pu css -f co
 
-XXX: NEEDS UPDATE
-
 There are a few simple tests in test/CodeGen/ALF. Here is how it works (starting in llvm directory):
 
-The tests for the ALFBackend are located in `test/CodeGen/ALF`.
-Here is how it works (starting in llvm directory):
-
     # [llvm/] Add llvm bin directory to PATH
-    export PATH=`pwd`/Debug/bin:${PATH}
+    export PATH=`pwd`/Debug+Asserts/bin:${PATH}
 
     # [llvm/] test directory for ALF
     cd test/CodeGen/ALF/harness
@@ -139,7 +134,7 @@ Here is how it works (starting in llvm directory):
 Note that .ll files contain disassembled LLVM bitcode. To get from C to .ll,
 you need a C frontend such as clang.
 
-    # [llvm/test/CodeGen/ALF] generate bitcode
+    # [llvm/test/CodeGen/ALF/harness] generate bitcode
     clang -Wall -emit-llvm -S -o - array.c | \
         opt -mem2reg -instcombine -instsimplify -instnamer | \
         llvm-dis -o array.ll
@@ -149,5 +144,3 @@ you need a C frontend such as clang.
   
     # [llvm/test/CodeGen/ALF/harness] analyze using sweet (single path mode)
     sweet -i=array.alf func=main -ae ffg=ub vola=t pu css -f co
-
-
