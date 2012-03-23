@@ -131,6 +131,12 @@ There are a few simple tests in test/CodeGen/ALF. Here is how it works (starting
     # [llvm/] test directory for ALF
     cd test/CodeGen/ALF/harness
 
+    # [llvm/test/CodeGen/ALF/harness] Test Harness
+    # Runs a set of tests and checks the expected number of failures
+    # Assumes there is a 'sweet' program available
+    bash run_tests
+
+
 Note that .ll files contain disassembled LLVM bitcode. To get from C to .ll,
 you need a C frontend such as clang.
 
