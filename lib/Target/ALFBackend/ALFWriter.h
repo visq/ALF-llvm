@@ -315,6 +315,17 @@ namespace llvm {
 
     std::string interpretASMConstraint(InlineAsm::ConstraintInfo& c);
 
+    /// isScalarValueType - Check whether the given type is a primitive type
+    /// in ALF; pointers (that is, framerefs), integers (signed and unsigned of any size)
+    /// and floats (of any size), as well as void type (1 byte)
+    /// are considered to be primitive, while all composite types are not
+    static bool isScalarValueType(const Type* Ty) {
+        if(Ty->isVoidTy()) return true;
+        if(Ty->isPointerTy()) return true;
+        if(Ty->isVectorTy()) return false;
+        return Ty->isPrimitiveType();
+    }
+
     /// isExpressionInst - Check whether the instruction corresponds
     ///  to an ALF expression, not an ALF statement.
     ///  - PHI node variables are assigned in the predecessor basic block,

@@ -363,12 +363,11 @@ void ALFWriter::visitStoreInst(StoreInst &I) {
   // FIXME: Deal with Alignment
   Type* OperandType = I.getOperand(0)->getType();
   bool IsUnaligned = I.getAlignment() &&
-                     I.getAlignment() < TD->getABITypeAlignment(OperandType);
+                     I.getAlignment() > TD->getABITypeAlignment(OperandType);
   if(IsUnaligned) {
     errs() << "Error: Alignment is " << itostr(I.getAlignment()) <<
               ", but ABI requirement is " <<  itostr(TD->getABITypeAlignment(OperandType)) <<
               " for operand type " << typeToString(*OperandType) << "\n";
-    alf_fatal_error("Unaligned memory write access not supported yet", I);
   }
 
   if(I.isVolatile() && ! IgnoreVolatiles) {
@@ -855,12 +854,20 @@ void ALFWriter::visitGetElementPtrInst(GetElementPtrInst &GepIns) {
     emitPointer(Ptr, Offsets);
 }
 
+/// Load a value from a frame.
+///
+/// FIXME: We should not load
+/// non-primitive types, as only values of primitive type (int,float)
+/// are defined in ALF.
+///
 /// FIXME: alignment issues are ignored for now
 void ALFWriter::visitLoadInst(LoadInst &I) {
+
   if(I.isVolatile() && ! IgnoreVolatiles) {
-	Output.load(getBitWidth(I.getType()),getVolatileStorage(I.getType()),0);
+    Output.load(getBitWidth(I.getType()),getVolatileStorage(I.getType()),0);
     return;
   }
+
   Output.startList("load");
   Output.atom(getBitWidth(I.getType()));
   emitOperand(I.getOperand(0));
