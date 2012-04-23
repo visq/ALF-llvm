@@ -20,9 +20,9 @@ Getting It
 
 This is the preferred way of obtaining `llvm-otap`.
 You need git (the version control system).
- 
+
     # [./]  pull official git repo
-    git clone http://llvm.org/git/llvm.git 
+    git clone http://llvm.org/git/llvm.git
     cd llvm
 
     # [llvm/] add remote to our public repo
@@ -30,7 +30,7 @@ You need git (the version control system).
 
     # [llvm/] add remote to our developer repo (if you are registered)
     #   Also see https://forge.vmars.tuwien.ac.at/projects/otap-llvm
-    # Developer setup 
+    # Developer setup
     #  (a) Visit https://forge.vmars.tuwien.ac.at/my/public_keys
     #  (b) Create a new key
     #  (c) Try 'ssh gitosis@forge.vmars.tuwien.ac.at'
@@ -39,7 +39,7 @@ You need git (the version control system).
     #
     git remote rename forge forge-read-only
     git remote add forge gitosis@forge.vmars.tuwien.ac.at:otap-llvm.git
-  
+
     # [llvm/] fetch forge repository
     git fetch forge
 
@@ -48,14 +48,13 @@ You need git (the version control system).
 
     # [llvm/] clone clang (C/C++ frontend)
     cd tools
-    git clone http://llvm.org/git/clang.git  
+    git clone http://llvm.org/git/clang.git
     cd clang
 
-  cd clang
-  # [llvm/tools/clang/] synchronize with the llvm version (currently: release 3.0)
-  git checkout remotes/origin/release_30 -b release_30
-  cd ../..
- 
+    # [llvm/tools/clang/] synchronize with the llvm version (currently: release 3.0)
+    git checkout remotes/origin/release_30 -b release_30
+    cd ../..
+
 _NOTE_: Currently there is no master branch in the otap-llvm repository.
 In my repository, the master branch points to the HEAD of the
 [official llvm git mirror](http://llvm.org/git/llvm.git).
@@ -72,12 +71,13 @@ Setting things up
 -----------------
 
 Add the LLVM binaries to your PATH environment variable.
- 
-    export PATH=<path-to-llvm>/Debug+Asserts/bin:${PATH}
 
-You need to use a frontend to obtain LLVM bitcode. Here is the recommended way 
-to translate C to bitcode using clang. Note that 4 standard transformations
-are run to simplify the translator and improve its effectiveness (mem2reg, 
+    # [llvm/] add LLVM binaries (in ./Debug or ./Debug+Asserts) to your PATH
+    export PATH=$(dirname $(find $(pwd) -wholename '*/bin/llc')):${PATH}
+
+You need to use a frontend to obtain LLVM bitcode. Here is the recommended way
+to translate C to bitcode using clang. Note that four standard transformations
+are run to simplify the translator and improve its effectiveness (mem2reg,
 instcombine, instsimplify, instnamer).
 
     # From C code ($f.c) to LLVM bitcode ($f.ll)
@@ -92,41 +92,43 @@ The LLVM backend driver llc is used to generate ALF code.
 Here are the relevant options:
 
 * `-alf-ignore-volatiles`
-  
+
   Ignore volatile modifier for loads and stores (default=false)
-  
+
 * `-alf-memory-areas=<string>`
-  
-  Comma-separated list of memory ranges, accessed using absolute addresses 
-  (e.g.'0x0-0xe,0x30-0x40').
+
+  Comma-separated list of memory ranges, accessed using absolute addresses
+  (e.g., `0x0-0xe,0x30-0x40`).
   If no memory areas are specified, one infinite size frame `$mem` is used,
   otherwise the frames have the specified sizes and are called `$mem_<ix>`
-  e.g. `$mem_0`,`$mem_1`)
-  
+  (`$mem_0`,`$mem_1`,etc.)
+
 * `-alf-standalone`
-  
-  Define stubs for undefined functions and define common frames, instead of 
+
+  Define stubs for undefined functions and define common frames, instead of
   importing them.
-  
+
 * `-alf-target-data=<string>`
 
-  Target data string for ALF code generation
-  alignment and pointer properties, default HOST)
+  Target data string for ALF code generation, specifying for example
+  data alignment or the size of pointers (default: `HOST`)
 
 ### Example Usage
 
 Here is an example of using the translator:
 
     llc -march=alf -alf-standalone -alf-memory-areas=0x0000-0x1000 -o test.alf test.ll
-  
-When analyzing the ALF modules using SWEET, you need to specify the entry point. C names should directly correspond to ALF names. Furthermore, you have to specify 'vola=t' to get correct results. Here is an example:
+
+When analyzing the ALF modules using SWEET, you need to specify the entry point. C names should directly correspond to ALF names. Furthermore, you have to specify `vola=t` to correctly interpret volatile memory accesses.
+Here is an example:
 
     sweet -i=test.alf func=main -ae ffg=ub vola=t pu css -f co
 
-There are a few simple tests in test/CodeGen/ALF. Here is how it works (starting in llvm directory):
+There are a few simple tests in `test/CodeGen/ALF`.
+The tests can be executed as follows (starting in llvm directory):
 
-    # [llvm/] Add llvm bin directory to PATH
-    export PATH=`pwd`/Debug+Asserts/bin:${PATH}
+    # [llvm/] Add LLVM bin directory to PATH
+    export PATH=$(dirname $(find $(pwd) -wholename '*/bin/llc')):${PATH}
 
     # [llvm/] test directory for ALF
     cd test/CodeGen/ALF/harness
@@ -137,8 +139,8 @@ There are a few simple tests in test/CodeGen/ALF. Here is how it works (starting
     bash run_tests
 
 
-Note that .ll files contain disassembled LLVM bitcode. To get from C to .ll,
-you need a C frontend such as clang.
+Note that `.ll` files contain disassembled LLVM bitcode. To get from C to bitcode,
+you need a C frontend for LLVM, such as clang or dragonegg.
 
     # [llvm/test/CodeGen/ALF/harness] generate bitcode
     clang -Wall -emit-llvm -S -o - array.c | \
@@ -147,6 +149,6 @@ you need a C frontend such as clang.
 
     # [llvm/test/CodeGen/ALF/harness] generate ALF code
     llc -march=alf -o array.alf array.ll
-  
+
     # [llvm/test/CodeGen/ALF/harness] analyze using sweet (single path mode)
     sweet -i=array.alf func=main -ae ffg=ub vola=t pu css -f co
