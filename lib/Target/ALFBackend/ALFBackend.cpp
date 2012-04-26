@@ -474,8 +474,14 @@ bool ALFBackend::doInitialization(Module &M) {
 	  Output.startList("init");
 	  Output.ref(I->first, 0);
 	  Output.startList("const_repeat",true);
-	  Output.dec_unsigned(1, APInt(1,0,false));
-	  Output.atom(utostr(I->second));
+	  /* Initialize with 0-values in chunks of size LAU */
+	  if(I->second < 8) {
+	      Output.dec_unsigned(I->second, APInt(I->second,0,false));
+	      Output.atom(utostr(1));
+	  } else {
+          Output.dec_unsigned(8, APInt(8,0,false));
+          Output.atom(utostr(I->second / 8));
+	  }
 	  Output.endList("const_repeat");
 	  Output.atom("volatile");
 	  Output.endList("init");
