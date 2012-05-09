@@ -1460,16 +1460,29 @@ void ALFWriter::emitPointer(Value *Operand, uint64_t Offset) {
     Output.dec_unsigned(1,0); // No carry bit
     Output.endList("add"); // Close add expression
 }
+
+// Multiplication takes two operands i<n> A and i<m> B,
+// multiplies them to obtain i<n+m> (A*B), and then selects
+// the first BitWidth bits of the result (truncate A*B to i<ResultBitWidth>).
+// The usual case is to have n=m, selecting the less significant half of the
+// multiplication result.
+//
 // TODO: is it ok to emulate LLVM multiplication this way?
+//
 // FIXME: support nsw flags etc.
-void ALFWriter::emitMultiplication(unsigned BitWidth, Value* Op1, Value* Op2) {
+void ALFWriter::emitMultiplication(unsigned ResultBitWidth, Value* Op1, Value* Op2) {
+  unsigned BitWidth1 = getBitWidth(Op1->getType());
+  unsigned BitWidth2 = getBitWidth(Op2->getType());
+  if(BitWidth1+BitWidth2 < ResultBitWidth) {
+      report_fatal_error("[llvm2alf] emitMultiplication(): Invalid Size of operands");
+  }
   Output.startList("select");
-  Output.atom(BitWidth + BitWidth);
+  Output.atom(BitWidth1 + BitWidth2);
   Output.atom(0);
-  Output.atom(BitWidth - 1);
+  Output.atom(ResultBitWidth - 1);
   Output.startList("u_mul",true);
-  Output.atom(BitWidth);
-  Output.atom(BitWidth);
+  Output.atom(BitWidth1);
+  Output.atom(BitWidth2);
   emitOperand(Op1);
   emitOperand(Op2);
   Output.endList("u_mul");
