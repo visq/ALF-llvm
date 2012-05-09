@@ -273,12 +273,7 @@ void ALFWriter::emitFunctionSignature(const Function *F) {
 
       std::string ArgName;
       for (; I != E; ++I) {
-          std::string ArgName;
-          if (! I->hasName()) {
-              ArgName = "__unused__" + utostr(Idx);
-          } else {
-              ArgName = getValueName(I);
-          }
+          std::string ArgName = getValueName(I);
           Type *ArgTy = I->getType();
           if (PAL.paramHasAttr(Idx, Attribute::ByVal)) {
               errs() << "[llvm2alf] Warning: ByVal parameter does not conform to C interface" << typeToString(*FT) << "\n";
