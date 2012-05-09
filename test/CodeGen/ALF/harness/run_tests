@@ -15,6 +15,7 @@ ERROR=0
 rm -f "error.log"
 if [ -z $1 ] ; then
     TESTS="*.test"
+    CHECK_EXPECTED=1
 else
     TESTS="$@"
 fi
@@ -41,11 +42,13 @@ echo "Comparing against [1] otap-llvm HEAD + sweet HEAD (Nov 14 2011)"
 echo "${TOTAL} tests executed (expected: ${EXPECTED_TESTS})"
 echo "${ERROR:-0} tests failed (expected: ${EXPECTED_FAILURES}) [1]"
 echo "See error.log for all error reports"
-if [ "${TOTAL}" -ne "${EXPECTED_TESTS}" ] ; then
-    echo "*** Unexpected number of tests"
-    exit 1
-fi
-if [ "${ERROR}" -ne ${EXPECTED_FAILURES}  ] ; then
-    echo "*** Unexpected failures"
-    exit 1
+if [ ! -z "${CHECK_EXPECTED}" ] ; then
+    if [ "${TOTAL}" -ne "${EXPECTED_TESTS}" ] ; then
+        echo "*** Unexpected number of tests"
+        exit 1
+    fi
+    if [ "${ERROR}" -ne ${EXPECTED_FAILURES}  ] ; then
+        echo "*** Unexpected failures"
+        exit 1
+    fi
 fi
