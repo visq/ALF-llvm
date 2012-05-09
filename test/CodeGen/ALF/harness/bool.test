@@ -1,0 +1,7 @@
+M=bool
+TIMEOUT=120
+MERGE=none
+DOMAIN_FLAGS="floats=est"
+source libtest
+sweet_css || die "sweet single-path execution failure/timeout"
+check_ret_val "u[0,0]" || die "wrong result: [0,0] /= ${RESULT}"
