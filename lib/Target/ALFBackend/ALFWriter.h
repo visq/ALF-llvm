@@ -136,7 +136,7 @@ namespace llvm {
   class ALFWriter : public InstVisitor<ALFWriter> {
 
 	/// Least Addressable Unit
-    unsigned LeastAddrUnit;      // Least Addressable Unit (8 bit is probably ok)
+    unsigned LeastAddrUnit;      // Least Addressable Unit
 
     /// ALF output stream
     ALFOutput& Output;
@@ -182,8 +182,8 @@ namespace llvm {
 	/// Type of (case,target) list for switch instructions
 	typedef SmallVector< std::pair<Value*, BasicBlock*> , 32> CaseVector;
 
-	explicit ALFWriter(ALFOutput &O, bool FlagIgnoreVolatiles)
-      : LeastAddrUnit(8),
+	explicit ALFWriter(ALFOutput &O, unsigned lau, bool FlagIgnoreVolatiles)
+      : LeastAddrUnit(lau),
         Output(O),
         IgnoreVolatiles(FlagIgnoreVolatiles),
         NextAnonValueNumber(0),
@@ -443,7 +443,7 @@ namespace llvm {
     /// Get number of bits needed to represent the given type in the ALF memory model
     /// Uses TargetData TD to support platfrom-specific behavior
     unsigned getBitWidth(Type *Ty) {
-		return TD->getTypeSizeInBits(Ty);
+        return TD->getTypeSizeInBits(Ty);
     }
 
     /// Get the number of bits needed to represent the exponent of a FP number

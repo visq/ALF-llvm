@@ -1,4 +1,4 @@
-//===-- ALFWriter.h - Module for generating ALF code --------------===//
+//===-- ALFOutput.h - Module for generating ALF code --------------===//
 //
 //                     Benedikt Huber, <benedikt@vmars.tuwien.ac.at>
 //                     Using The LLVM Compiler Infrastructure
