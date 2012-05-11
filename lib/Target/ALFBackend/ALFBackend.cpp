@@ -515,7 +515,6 @@ bool ALFBackend::doInitialization(Module &M) {
 		  // If function is not defined and not an intrinsic, we either need to import it or generate a stub
 		  // TODO Linkage / LLVM_ASM (name starts with 1)
 		  if(! F->isDeclaration() || F->isIntrinsic()) continue;
-
 		  Output.newline();
 		  Output.comment("-------------------- STUB FOR UNDEFINED FUNCTION " + F->getNameStr() + " --------------------");
 		  Output.startList("func");
@@ -524,6 +523,7 @@ bool ALFBackend::doInitialization(Module &M) {
 		  Output.startList("decls"); Output.endList("decls");
 		  Output.startList("inits"); Output.endList("inits");
 		  Output.startList("stmts");
+		  Output.setStmtLabel(F->getNameStr() + "::stub");
 		  Output.startStmt("return");
 		  Type *RTy = F->getReturnType();
 		  Output.load(Writer.getBitWidth(RTy),Writer.getVolatileStorage(RTy),0);
