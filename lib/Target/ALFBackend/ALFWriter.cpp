@@ -497,7 +497,7 @@ bool ALFWriter::visitBuiltinCall(CallInst &I, Intrinsic::ID ID,
 			  Output.startList("add",true);
 			  Output.atom(TD->getTypeSizeInBits(Dst->getType()));
 			  emitExpression(Dst);
-			  Output.dec_unsigned(TD->getTypeSizeInBits(Dst->getType()), I);
+			  Output.dec_unsigned(TD->getTypeSizeInBits(Dst->getType()), bitsToLAU(I*8));
 			  Output.dec_unsigned(1,0);
 			  Output.endList("add");
 		  }
@@ -511,7 +511,7 @@ bool ALFWriter::visitBuiltinCall(CallInst &I, Intrinsic::ID ID,
 				  Output.startList("add",true);
 				  Output.atom(TD->getTypeSizeInBits(Src->getType()));
 				  emitExpression(Src);
-				  Output.dec_unsigned(TD->getTypeSizeInBits(Src->getType()), I);
+				  Output.dec_unsigned(TD->getTypeSizeInBits(Src->getType()), bitsToLAU(I*8));
 				  Output.dec_unsigned(1,0);
 				  Output.endList("add");
 				  Output.endList("load");
@@ -614,8 +614,7 @@ void ALFWriter::visitBinaryOperator(Instruction &I) {
   assert(!I.getType()->isPointerTy());
 
 
-  // If this is a negation operation, print it out as such.  For FP, we don't
-  // want to print "-0.0 - X".
+  // If this is a negation operation (0-X), print it out as such
   if (BinaryOperator::isNeg(&I)) {
       Value* Operand = BinaryOperator::getNegArgument(cast<BinaryOperator>(&I));
       Output.startList("neg",true);
@@ -632,13 +631,8 @@ void ALFWriter::visitBinaryOperator(Instruction &I) {
       emitOperand(Operand);
       Output.endList("f_neg");
 
-  } else if (I.getOpcode() == Instruction::FRem) {
-    // TODO: output a call to fmod/fmodf instead of emitting a%b
-    errs() << "[llvm2alf]: frem is not yet supported\n";
-    Output.undefined(getBitWidth(I.getType()));
   } else {
 
-    string Cmd;
     Type *OpTy = I.getOperand(0)->getType();
     unsigned BitWidth  = OpTy->getPrimitiveSizeInBits();
     assert(OpTy->getTypeID() == I.getOperand(1)->getType()->getTypeID()
@@ -646,98 +640,90 @@ void ALFWriter::visitBinaryOperator(Instruction &I) {
     assert(BitWidth == I.getOperand(1)->getType()->getPrimitiveSizeInBits()
            && "arithmetic operation: Bit width of operands has to match");
 
+    string Cmd;
+    enum BinOpTy { AddSub, Mul, DivRem, Logic, Shift, FpOp } BinOpType;
     switch (I.getOpcode()) {
-    case Instruction::Add:  Cmd = "add"; break;
-    case Instruction::Sub:  Cmd = "sub"; break;
+    case Instruction::Add: Cmd = "add"; BinOpType = AddSub; break;
+    case Instruction::Sub: Cmd = "sub"; BinOpType = AddSub; break;
+    case Instruction::Mul: BinOpType = Mul; break;
+    case Instruction::UDiv: Cmd = "u_div"; BinOpType = DivRem; break;
+    case Instruction::SDiv: Cmd = "s_div"; BinOpType = DivRem; break;
+    case Instruction::URem: Cmd = "u_mod"; BinOpType = DivRem; break;
+    case Instruction::SRem: Cmd = "s_mod"; BinOpType = DivRem; break;
+    case Instruction::And:  Cmd = "and"; BinOpType = Logic; break;
+    case Instruction::Or:   Cmd = "or"; BinOpType = Logic; break;
+    case Instruction::Xor:  Cmd = "xor"; BinOpType = Logic; break;
+    case Instruction::Shl : Cmd = "l_shift"; BinOpType = Shift; break;
+    case Instruction::LShr: Cmd = "r_shift";  BinOpType = Shift; break;
+    case Instruction::AShr: Cmd = "r_shift_a";  BinOpType = Shift; break;
+    case Instruction::FAdd: Cmd = "f_add"; BinOpType = FpOp; break;
+    case Instruction::FSub: Cmd = "f_sub"; BinOpType = FpOp; break;
+    case Instruction::FMul: Cmd = "f_mul"; BinOpType = FpOp; break;
+    case Instruction::FDiv: Cmd = "f_div"; BinOpType = FpOp; break;
+    case Instruction::FRem:
+        // TODO: support frem
+        errs() << "[llvm2alf]: frem is not yet supported\n";
+        Output.undefined(getBitWidth(I.getType()));
+        return;
+    default:
+        alf_fatal_error("Invalid operator type", I);
+        llvm_unreachable(0);
     }
-    if(! Cmd.empty()) {
+
+    if(BinOpType == AddSub) {
+        /* FIXME: Supporting pointer arithmetic for LAU!=8
+         *   (a) i1 +- i2 = (add/sub i1 i2)
+         *   (b) ptrtoint[p2] - ptrtoint[p1] ==> lauToBytes[sub p2 p1]
+         *   (c) ptrtoint[p] +- i ==> add p bytesToLau[i]
+         */
+        Value *Ops[2];
+        bool IsPointerOperand[2] = { false, false };
+        for(int OpIx = 0; OpIx < 2; ++OpIx) {
+            Ops[OpIx] = I.getOperand(OpIx);
+            if(PtrToIntInst* SubOp = dyn_cast<PtrToIntInst>(Ops[OpIx])) {
+            	Ops[OpIx] = SubOp->getOperand(0);
+            	IsPointerOperand[OpIx] = true;
+            }
+        }
         Output.startList(Cmd);
         Output.atom(BitWidth);
-
-        /* To support pointer arithmetic, ignore ptr2int in operands for add and sub */
-        for(int OpIx = 0; OpIx < 2; ++OpIx) {
-            Value *Op = I.getOperand(OpIx);
-            if(PtrToIntInst* SubOp = dyn_cast<PtrToIntInst>(Op)) {
-            	Op = SubOp->getOperand(0);
-            }
-            emitOperand(Op);
-        }
-
+        emitOperand(Ops[0]);
+        emitOperand(Ops[1]);
         Output.dec_unsigned(1,I.getOpcode() == Instruction::Add ? 0 : 1);
         Output.endList(Cmd);
         return;
-    }
-    // FIXME: support nuw and nsw
-    // multiplication + bitcast
-    if(I.getOpcode() == Instruction::Mul) {
+    } else if(BinOpType == Mul) {
+        // FIXME: support nuw and nsw
         emitMultiplication(BitWidth, I.getOperand(0), I.getOperand(1));
-        return;
-    }
-
-    switch (I.getOpcode()) {
-    case Instruction::UDiv: Cmd = "u_div";break;
-    case Instruction::SDiv: Cmd = "s_div";break;
-    case Instruction::URem: Cmd = "u_mod";break;
-    case Instruction::SRem: Cmd = "s_mod";break;
-    }
-    if(! Cmd.empty()) {
+    } else if(BinOpType == DivRem) {
         Output.startList(Cmd);
         Output.atom(BitWidth);
         Output.atom(BitWidth);
         emitOperand(I.getOperand(0));
         emitOperand(I.getOperand(1));
         Output.endList(Cmd);
-        return;
-    }
-
-    switch (I.getOpcode()) {
-    case Instruction::And:  Cmd = "and"; break;
-    case Instruction::Or:   Cmd = "or"; break;
-    case Instruction::Xor:  Cmd = "xor"; break;
-    }
-    if(! Cmd.empty()) {
+    } else if(BinOpType == Logic) {
         Output.startList(Cmd);
         Output.atom(BitWidth);
         emitOperand(I.getOperand(0));
         emitOperand(I.getOperand(1));
         Output.endList(Cmd);
-        return;
-    }
-
-    switch (I.getOpcode()) {
-    case Instruction::Shl : Cmd = "l_shift"; break;
-    case Instruction::LShr: Cmd = "r_shift"; break;
-    case Instruction::AShr: Cmd = "r_shift_a"; break;
-    }
-    if(! Cmd.empty()) {
+    } else if(BinOpType == Shift) {
         Output.startList(Cmd);
         Output.atom(BitWidth);
         Output.atom(BitWidth);
         emitOperand(I.getOperand(0));
         emitOperand(I.getOperand(1));
         Output.endList(Cmd);
-        return;
-    }
-
-    switch (I.getOpcode()) {
-    case Instruction::FAdd: Cmd = "f_add"; break;
-    case Instruction::FSub: Cmd = "f_sub"; break;
-    case Instruction::FMul: Cmd = "f_mul"; break;
-    case Instruction::FDiv: Cmd = "f_div"; break;
-    }
-
-    if(! Cmd.empty()) {
+    } else if(BinOpType == FpOp) {
       Output.startList(Cmd);
       Output.atom(getExpWidth(OpTy));
       Output.atom(getFracWidth(OpTy));
       emitOperand(I.getOperand(0));
       emitOperand(I.getOperand(1));
       Output.endList(Cmd);
-      return;
     }
-
-    errs() << "Invalid operator type!" << I;
-    llvm_unreachable(0);
+    return;
   }
 
 }
@@ -1235,13 +1221,13 @@ std::auto_ptr<ALFConstant> ALFWriter::foldConstant(const Constant* Const) {
 		for(mem_areas_iterator I = mem_areas_begin(), E = mem_areas_end(); I!=E; ++I) {
 			if(I->doesInclude(AbsAddress)) {
 				std::string Frame = I->getName();
-				uint64_t    FrameOffset = I->getOffset(AbsAddress) * 8;
+				uint64_t    FrameOffset = I->getOffset(AbsAddress) * LeastAddrUnit;
 				return std::auto_ptr<ALFConstant>( new ALFConstAddress(false, Frame, FrameOffset) );
 			}
 		}
 		if(mem_areas_begin() == mem_areas_end()) {
 			// no memory areas specified, use default catch-all
-			return std::auto_ptr<ALFConstant>( new ALFConstAddress(false, ABS_REF, AbsAddress * 8) );
+			return std::auto_ptr<ALFConstant>( new ALFConstAddress(false, ABS_REF, AbsAddress * LeastAddrUnit) );
 		} else {
 			errs() << "llvm2alf: foldConstant: invalid absolute address (not specified on the command line): " << AbsAddress << "\n";
 			return std::auto_ptr<ALFConstant>( 0 );
@@ -1569,8 +1555,30 @@ void ALFWriter::basicBlockHeader(const BasicBlock* BB) {
 }
 
 void ALFWriter::statementHeader(const Instruction &I, unsigned Index) {
+
     Output.comment("LLVM expression: " + I.getParent()->getParent()->getNameStr() + "::" +
-                   I.getParent()->getNameStr() + "::" + valueToString(I), false);
+                   I.getParent()->getNameStr(), false);
+    /* output all LLVM instructions combined in this ALF statement. Note that the dependency
+     * relation is acyclic if all PHI nodes are removed
+     */
+    std::vector<const Instruction *> Worklist, Instructions;
+    Worklist.push_back(&I);
+    while(! Worklist.size() == 0) {
+        const Instruction *Ins = Worklist.back();
+        Worklist.pop_back();
+        Instructions.push_back(Ins);
+        for(Instruction::const_op_iterator OI = Ins->op_begin(), OE = Ins->op_end(); OI != OE; ++OI) {
+            if(Instruction* Op = dyn_cast<Instruction>(OI)) {
+                if(isa<PHINode>(Op)) continue;
+                if(! isInlinableInst(*Op)) continue;
+                Worklist.push_back(Op);
+            }
+        }
+    }
+    for(std::vector<const Instruction*>::const_reverse_iterator II = Instructions.rbegin(), IE = Instructions.rend(); IE != II; ++ II) {
+        Output.comment("  " + valueToString(**II), false);
+    }
+
     CurrentStatementIndex = Index;
     if(! IsBasicBlockStart) {
         Output.setStmtLabel(getInstructionLabel(I.getParent(),Index));

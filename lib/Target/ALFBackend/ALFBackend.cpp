@@ -189,10 +189,10 @@ namespace {
 
     explicit ALFBackend(formatted_raw_ostream &ostream)
       : FunctionPass(ID),
-        LeastAddrUnit(8),
+        LeastAddrUnit(8), /* FIXME: Currently, the translator only works with LAU=8, but LLVM has 1-bit values */
         TD(0),  TCtx(0),TAsm(0), IL(0), Mang(0),
         Output(ostream, LeastAddrUnit),
-        Writer(Output, ALFIgnoreVolatiles),
+        Writer(Output, LeastAddrUnit, ALFIgnoreVolatiles),
         TheModule(0),  LI(0),
         FunctionCounter(0), NextAnonValueNumber(0) {
       initializeLoopInfoPass(*PassRegistry::getPassRegistry());
@@ -475,12 +475,12 @@ bool ALFBackend::doInitialization(Module &M) {
 	  Output.ref(I->first, 0);
 	  Output.startList("const_repeat",true);
 	  /* Initialize with 0-values in chunks of size LAU */
-	  if(I->second < 8) {
+	  if(I->second < LeastAddrUnit) {
 	      Output.dec_unsigned(I->second, APInt(I->second,0,false));
 	      Output.atom(utostr(1));
 	  } else {
-          Output.dec_unsigned(8, APInt(8,0,false));
-          Output.atom(utostr(I->second / 8));
+          Output.dec_unsigned(LeastAddrUnit, APInt(LeastAddrUnit,0,false));
+          Output.atom(utostr(I->second / LeastAddrUnit));
 	  }
 	  Output.endList("const_repeat");
 	  Output.atom("volatile");
