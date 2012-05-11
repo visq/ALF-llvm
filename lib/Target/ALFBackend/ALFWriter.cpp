@@ -355,15 +355,8 @@ void ALFWriter::visitUnreachableInst(UnreachableInst &I) {
 
 
 void ALFWriter::visitStoreInst(StoreInst &I) {
-  // FIXME: Deal with Alignment
+  // TODO: do we really need to check alignment?
   Type* OperandType = I.getOperand(0)->getType();
-  bool IsUnaligned = I.getAlignment() &&
-                     I.getAlignment() > TD->getABITypeAlignment(OperandType);
-  if(IsUnaligned) {
-    errs() << "Error: Alignment is " << itostr(I.getAlignment()) <<
-              ", but ABI requirement is " <<  itostr(TD->getABITypeAlignment(OperandType)) <<
-              " for operand type " << typeToString(*OperandType) << "\n";
-  }
 
   if(I.isVolatile() && ! IgnoreVolatiles) {
 	  // In general, it is not safe to ignore volatile stores. A store to a regular
