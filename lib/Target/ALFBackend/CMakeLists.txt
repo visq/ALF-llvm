@@ -1,4 +1,5 @@
-add_llvm_target(ALFBackend
+add_llvm_target(
+  ALFBackendCodeGen
   ALFBackend.cpp
   ALFWriter.cpp
   )

@@ -276,9 +276,6 @@ namespace llvm {
     void visitInvokeInst(InvokeInst &I) {
       report_fatal_error("LLVM -> ALF: invoke instruction not eliminated by lowerinvoke pass!");
     }
-    void visitUnwindInst(UnwindInst &I) {
-      report_fatal_error("LLVM -> ALF: unwind instruction not eliminated by lowerinvoke pass!");
-    }
 
     // LLVM IR Expression Instructions
     void visitPHINode(PHINode &I);
