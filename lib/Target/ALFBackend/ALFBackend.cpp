@@ -516,14 +516,14 @@ bool ALFBackend::doInitialization(Module &M) {
 		  // TODO Linkage / LLVM_ASM (name starts with 1)
 		  if(! F->isDeclaration() || F->isIntrinsic()) continue;
 		  Output.newline();
-		  Output.comment("-------------------- STUB FOR UNDEFINED FUNCTION " + F->getNameStr() + " --------------------");
+		  Output.comment("-------------------- STUB FOR UNDEFINED FUNCTION " + F->getName().str() + " --------------------");
 		  Output.startList("func");
 		  Writer.emitFunctionSignature(F);
 		  Output.startList("scope");
 		  Output.startList("decls"); Output.endList("decls");
 		  Output.startList("inits"); Output.endList("inits");
 		  Output.startList("stmts");
-		  Output.setStmtLabel(F->getNameStr() + "::stub");
+		  Output.setStmtLabel(F->getName().str() + "::stub");
 		  Output.startStmt("return");
 		  Type *RTy = F->getReturnType();
 		  Output.load(Writer.getBitWidth(RTy),Writer.getVolatileStorage(RTy),0);
@@ -556,7 +556,7 @@ void ALFBackend::visitFunction(Function &F) {
   bool isStructReturn = F.hasStructRetAttr();
 
   Output.newline();
-  Output.comment("-------------------- FUNCTION " + F.getNameStr() + " --------------------");
+  Output.comment("-------------------- FUNCTION " + F.getName().str() + " --------------------");
   Output.startList("func");
 
   Writer.emitFunctionSignature(&F);
@@ -750,7 +750,6 @@ void ALFBackend::lowerIntrinsics(Function &F) {
 bool ALFTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
                                          formatted_raw_ostream &o,
                                          CodeGenFileType FileType,
-                                         CodeGenOpt::Level OptLevel,
                                          bool DisableVerify) {
   if (FileType != TargetMachine::CGFT_AssemblyFile) return true;
 

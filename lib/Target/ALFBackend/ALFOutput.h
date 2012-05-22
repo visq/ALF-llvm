@@ -31,10 +31,10 @@ using namespace llvm;
 namespace llvm {
 
 
-	enum ALFType { ALFInteger, ALFFloat, ALFAddress };
-	class ALFConstant;
+    enum ALFType { ALFInteger, ALFFloat, ALFAddress };
+    class ALFConstant;
 
-	class ALFOutput {
+    class ALFOutput {
 
       private:
           formatted_raw_ostream& Out;
@@ -101,7 +101,7 @@ namespace llvm {
           }
 
           void newline() {
-        	  Out << '\n';
+              Out << '\n';
           }
 
           /// start an S-Expression list; only use this if no specific builder instruction is available
@@ -141,14 +141,14 @@ namespace llvm {
 
           void identifier(const std::string& Ident) {
               insertSpace(true);
-        	  Out << "\"";
-        	  for (unsigned i = 0, e = Ident.size(); i != e; ++i) {
-        		  if (Ident[i] == '"' || Ident[i] == '\\') {
-        			  Out << "\\";
-        		  }
-        	      Out << Ident[i];
-        	  }
-        	  Out << "\"";
+              Out << "\"";
+              for (unsigned i = 0, e = Ident.size(); i != e; ++i) {
+                  if (Ident[i] == '"' || Ident[i] == '\\') {
+                      Out << "\\";
+                  }
+                  Out << Ident[i];
+              }
+              Out << "\"";
           }
 
           //===----------------------------------------------------------------------===//
@@ -183,25 +183,25 @@ namespace llvm {
 
           /// ALF has C-Style comments
           void comment(const string& Comment, bool Inline = true) {
-        	  if(!Inline) {
+              if(!Inline) {
                   Out << '\n';
                   for(unsigned i = 0; i < Indent && i < MaxIndent; ++i) Out << ' ';
-        	  } else {
-        		  Out << ' ';
-        	  }
-        	  Out << "/* ";
-        	  for(string::const_iterator i = Comment.begin(),
-						           e = Comment.end(); i != e; ++i) {
-        		  if(*i == '/') {
-        			  Out << "\\/";
-        		  } else {
-        			  Out << *i;
-        		  }
-        	  }
-        	  Out << " */";
-        	  if(Inline) {
-        		  Out << ' ';
-        	  }
+              } else {
+                  Out << ' ';
+              }
+              Out << "/* ";
+              for(string::const_iterator i = Comment.begin(),
+                                   e = Comment.end(); i != e; ++i) {
+                  if(*i == '/') {
+                      Out << "\\/";
+                  } else {
+                      Out << *i;
+                  }
+              }
+              Out << " */";
+              if(Inline) {
+                  Out << ' ';
+              }
           }
 
           void undefined(unsigned BitWidth) {
@@ -294,9 +294,9 @@ namespace llvm {
           void jump(const string &Id, uint64_t Offset = 0, uint64_t Leaving = 0) {
                 startStmt("jump");
                 labelRef(Id, Offset);
-        	    atom("leaving");
-        	    atom(Leaving);
-        	    endStmt("jump");
+                atom("leaving");
+                atom(Leaving);
+                endStmt("jump");
           }
 
 
@@ -349,13 +349,13 @@ namespace llvm {
 
           void float_val(unsigned ExpBitWidth, unsigned FracBitWidth, const APFloat& Value) {
 
-        	  unsigned totalBitWidth = 1 + ExpBitWidth + FracBitWidth;
-        	  if(Value.isInfinity() || Value.isNaN()) {
-        		  undefined(totalBitWidth);
-        		  return;
-        	  }
+              unsigned totalBitWidth = 1 + ExpBitWidth + FracBitWidth;
+              if(Value.isInfinity() || Value.isNaN()) {
+                  undefined(totalBitWidth);
+                  return;
+              }
 
-        	  startList("float_val",true);
+              startList("float_val",true);
               atom(ExpBitWidth);
               atom(FracBitWidth);
               llvm::SmallString<64> buffer;
@@ -364,10 +364,10 @@ namespace llvm {
               /* if there are only digits in the buffer, we need to add a '.' */
               bool onlyDigits = true;
               for(llvm::SmallString<64>::iterator I = buffer.begin(), E = buffer.end(); I!=E; ++I) {
-            	  if(! isdigit(*I) && *I != '-') onlyDigits=false;
+                  if(! isdigit(*I) && *I != '-') onlyDigits=false;
               }
               if(onlyDigits) {
-            	  buffer.append(1, '.');
+                  buffer.append(StringRef("."));
               }
 
               atom(buffer);
@@ -375,97 +375,97 @@ namespace llvm {
           }
     };
 
-	/// Class representing ALF constants (labels, addresses, integers and floats)
-	class ALFConstant {
-	protected:
-		/// type tag
-		ALFType Type;
-		ALFConstant(ALFType type) : Type(type) {}
-	public:
-		virtual ~ALFConstant() {}
-		ALFType getType() const { return Type; }
-		virtual void print(ALFOutput& Out) = 0;
-	};
+    /// Class representing ALF constants (labels, addresses, integers and floats)
+    class ALFConstant {
+    protected:
+        /// type tag
+        ALFType Type;
+        ALFConstant(ALFType type) : Type(type) {}
+    public:
+        virtual ~ALFConstant() {}
+        ALFType getType() const { return Type; }
+        virtual void print(ALFOutput& Out) = 0;
+    };
 
-	class ALFConstInteger : public ALFConstant {
-		unsigned BitWidth;
-		APInt Value;
-	public:
-		virtual ~ALFConstInteger() {}
-		ALFConstInteger(unsigned bitwidth, APInt value) :
-			ALFConstant(ALFInteger),
-			BitWidth(bitwidth),
-			Value(value) {
-		}
-		virtual void print(ALFOutput& Out) {
-			Out.dec_unsigned(BitWidth, Value);
-		}
-		APInt getValue() {
-			return Value;
-		}
-		uint64_t getLimitedValue(uint64_t Limit = ~0ULL) {
-			return Value.getLimitedValue(Limit);
-		}
-	    /// Methods for support type inquiry through isa, cast, and dyn_cast:
-	    static inline bool classof(const ALFConstInteger *C) { return true; }
-	    static inline bool classof(const ALFConstant *C) {
-	      return C->getType() == ALFInteger;
-	    }
-	};
+    class ALFConstInteger : public ALFConstant {
+        unsigned BitWidth;
+        APInt Value;
+    public:
+        virtual ~ALFConstInteger() {}
+        ALFConstInteger(unsigned bitwidth, APInt value) :
+            ALFConstant(ALFInteger),
+            BitWidth(bitwidth),
+            Value(value) {
+        }
+        virtual void print(ALFOutput& Out) {
+            Out.dec_unsigned(BitWidth, Value);
+        }
+        APInt getValue() {
+            return Value;
+        }
+        uint64_t getLimitedValue(uint64_t Limit = ~0ULL) {
+            return Value.getLimitedValue(Limit);
+        }
+        /// Methods for support type inquiry through isa, cast, and dyn_cast:
+        static inline bool classof(const ALFConstInteger *C) { return true; }
+        static inline bool classof(const ALFConstant *C) {
+          return C->getType() == ALFInteger;
+        }
+    };
 
-	class ALFConstFloat : public ALFConstant {
-		unsigned ExpBits, FracBits;
-		APFloat Value;
-	public:
-		virtual ~ALFConstFloat() {}
-		ALFConstFloat(unsigned expBits, unsigned fracBits, APFloat value) :
-			ALFConstant(ALFFloat),
-			ExpBits(expBits), FracBits(fracBits),
-			Value(value) {
-		}
-		virtual void print(ALFOutput& Out) {
-			Out.float_val(ExpBits, FracBits, Value);
-		}
-	    /// Methods for support type inquiry through isa, cast, and dyn_cast:
-	    static inline bool classof(const ALFConstFloat *C) { return true; }
-	    static inline bool classof(const ALFConstant *C) {
-	      return C->getType() == ALFFloat;
-	    }
-	};
+    class ALFConstFloat : public ALFConstant {
+        unsigned ExpBits, FracBits;
+        APFloat Value;
+    public:
+        virtual ~ALFConstFloat() {}
+        ALFConstFloat(unsigned expBits, unsigned fracBits, APFloat value) :
+            ALFConstant(ALFFloat),
+            ExpBits(expBits), FracBits(fracBits),
+            Value(value) {
+        }
+        virtual void print(ALFOutput& Out) {
+            Out.float_val(ExpBits, FracBits, Value);
+        }
+        /// Methods for support type inquiry through isa, cast, and dyn_cast:
+        static inline bool classof(const ALFConstFloat *C) { return true; }
+        static inline bool classof(const ALFConstant *C) {
+          return C->getType() == ALFFloat;
+        }
+    };
 
-	class ALFConstAddress : public ALFConstant {
-		bool IsCodeAddress;
-		std::string Name;
-		uint64_t Offset;
-	public:
-		virtual ~ALFConstAddress() {}
-		ALFConstAddress(bool isCodeAddress, std::string name, uint64_t offset) :
-			ALFConstant(ALFAddress),
-			IsCodeAddress(isCodeAddress),
-			Name(name), Offset(offset) {
-		}
-		virtual void print(ALFOutput& Out) {
-			if(IsCodeAddress) {
-				Out.labelRef(Name, Offset);
-			} else {
-				Out.address(Name, Offset);
-			}
-		}
-		void addOffset(uint64_t OffsIncrement) {
-			Offset += OffsIncrement;
-		}
-		std::string getFrame() {
-			return Name;
-		}
-		uint64_t getOffset() {
-			return Offset;
-		}
-	    /// Methods for support type inquiry through isa, cast, and dyn_cast:
-	    static inline bool classof(const ALFConstAddress *C) { return true; }
-	    static inline bool classof(const ALFConstant *C) {
-	      return C->getType() == ALFAddress;
-	    }
-	};
+    class ALFConstAddress : public ALFConstant {
+        bool IsCodeAddress;
+        std::string Name;
+        uint64_t Offset;
+    public:
+        virtual ~ALFConstAddress() {}
+        ALFConstAddress(bool isCodeAddress, std::string name, uint64_t offset) :
+            ALFConstant(ALFAddress),
+            IsCodeAddress(isCodeAddress),
+            Name(name), Offset(offset) {
+        }
+        virtual void print(ALFOutput& Out) {
+            if(IsCodeAddress) {
+                Out.labelRef(Name, Offset);
+            } else {
+                Out.address(Name, Offset);
+            }
+        }
+        void addOffset(uint64_t OffsIncrement) {
+            Offset += OffsIncrement;
+        }
+        std::string getFrame() {
+            return Name;
+        }
+        uint64_t getOffset() {
+            return Offset;
+        }
+        /// Methods for support type inquiry through isa, cast, and dyn_cast:
+        static inline bool classof(const ALFConstAddress *C) { return true; }
+        static inline bool classof(const ALFConstant *C) {
+          return C->getType() == ALFAddress;
+        }
+    };
 
 }
 

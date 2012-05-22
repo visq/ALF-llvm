@@ -121,8 +121,12 @@ void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffse
     }
     // For arrays, emit initializer for every element
     case Type::ArrayTyID: {
-        assert(isa<ConstantArray>(Const) && "Non-Zero Array Constant not of type ConstantArray?");
-        emitCompositeInitializers(M,V,BitOffset,cast<ConstantArray>(Const));
+        if(ConstantDataArray* CDA = dyn_cast<ConstantDataArray>(Const)) {
+            emitCompositeInitializers(M,V,BitOffset,CDA);
+        } else {
+            assert(isa<ConstantArray>(Const) && "Non-Zero Array Constant not of type Constant[Data]Array?");
+            emitCompositeInitializers(M,V,BitOffset,cast<ConstantArray>(Const));
+        }
         return;
     }
     // For struct, emit initializer for every element
@@ -310,18 +314,18 @@ void ALFWriter::visitReturnInst(ReturnInst &I) {
 
 void ALFWriter::visitSwitchInst(SwitchInst &SI) {
 
-	  if(SI.getNumCases() > 1) {
+	  if(SI.getNumCases() > 0) { /* not just the default case */
 		  Value* Condition = SI.getCondition();
 
 		  /* one case: true -> 0, default -> 1 */
 	 	  ALFWriter::CaseVector Cases;
-		  for(unsigned i = 1; i < SI.getNumCases(); ++i) {
-				Cases.push_back(make_pair(SI.getCaseValue(i), SI.getSuccessor(i)));
-		  }
-		  emitSwitch(SI, Condition, Cases, SI.getSuccessor(0));
+	 	  for(SwitchInst::CaseIt I = SI.case_begin(), E = SI.case_end(); I != E; ++I) {
+	 	      Cases.push_back(make_pair(I.getCaseValue(), I.getCaseSuccessor()));
+	 	  }
+		  emitSwitch(SI, Condition, Cases, SI.getDefaultDest());
 
 	  } else { // emulated unconditional branch
-		  emitUnconditionalJump(SI.getParent(), SI.getSuccessor(0));
+		  emitUnconditionalJump(SI.getParent(), SI.getDefaultDest());
 	  }
 
 }
@@ -355,8 +359,6 @@ void ALFWriter::visitUnreachableInst(UnreachableInst &I) {
 
 
 void ALFWriter::visitStoreInst(StoreInst &I) {
-  // TODO: do we really need to check alignment?
-  Type* OperandType = I.getOperand(0)->getType();
 
   if(I.isVolatile() && ! IgnoreVolatiles) {
 	  // In general, it is not safe to ignore volatile stores. A store to a regular
@@ -1528,7 +1530,7 @@ void  ALFWriter::emitFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instr
 		  op = "s_to_f";
 		  break;
 	  default:
-		  report_fatal_error("emitFPIntCast: invalid opcode: "+Opcode);
+		  report_fatal_error("emitFPIntCast: invalid opcode: "+utostr(Opcode));
 	}
 	Output.startList(op);
 	Output.atom(getExpWidth(FloatTy));
@@ -1540,7 +1542,7 @@ void  ALFWriter::emitFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instr
 
 void ALFWriter::basicBlockHeader(const BasicBlock* BB) {
     Output.newline();
-    Output.comment("--------- BASIC BLOCK " + BB->getNameStr() + " ----------",false);
+    Output.comment("--------- BASIC BLOCK " + BB->getName().str() + " ----------",false);
     Output.newline();
     Output.setStmtLabel(getBasicBlockLabel(BB));
     Output.incrementIndent();
@@ -1549,8 +1551,8 @@ void ALFWriter::basicBlockHeader(const BasicBlock* BB) {
 
 void ALFWriter::statementHeader(const Instruction &I, unsigned Index) {
 
-    Output.comment("LLVM expression: " + I.getParent()->getParent()->getNameStr() + "::" +
-                   I.getParent()->getNameStr(), false);
+    Output.comment("LLVM expression: " + I.getParent()->getParent()->getName().str() + "::" +
+                   I.getParent()->getName().str(), false);
     /* output all LLVM instructions combined in this ALF statement. Note that the dependency
      * relation is acyclic if all PHI nodes are removed
      */
@@ -1608,9 +1610,9 @@ std::string ALFWriter::getBasicBlockLabel(const BasicBlock* BB) {
   if(! BB->hasName()) {
 	  name = getAnonValueName(BB);
   } else {
-	  name = BB->getNameStr();
+	  name = BB->getName().str();
   }
-  return BB->getParent()->getNameStr() + "::" + name;
+  return BB->getParent()->getName().str() + "::" + name;
 }
 
 std::string ALFWriter::getInstructionLabel(const BasicBlock *BB, unsigned Index) {
