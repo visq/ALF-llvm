@@ -23,13 +23,17 @@
 //
 // TODO: Support {extract,insert}value
 //
-// TODO: Support more intrinsics
+// TODO: Support more intrinsics (we currently lower ALL intrinsics except mem{cpy,set,move})
 //
 // TODO: Support struct return and byval parameters
 //
-// FIXME: We cannot handle weak and common linkage
+// TODO: Handle Linkage Declarations [1], we cannot handle weak and common linkage at the moment
 //
-// TODO: Support the new type 'Type::X86_MMXTyID'
+// TODO: Handle inline assembler
+//
+// TODO: Handle global CTors/DTors
+//
+// TODO: Support type 'Type::X86_MMXTyID'
 //
 // Note on PHI Nodes:
 //  The value of a PHI node depends on the predecessor: For each predecessor there
@@ -41,7 +45,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "ALFOutput.h"
-#include "ALFWriter.h"
+#include "ALFBuilder.h"
+#include "ALFTranslator.h"
 
 #include "ALFTargetMachine.h"
 #include "llvm/IntrinsicInst.h"
@@ -91,51 +96,7 @@ ALFStandalone("alf-standalone", cl::NotHidden,
 
 /* utilities */
 
-enum SpecialGlobalClass {
-  NotSpecial = 0,
-  GlobalCtors, GlobalDtors, OtherMetadata
-};
-
-/// getGlobalVariableClass - If this is a global that is specially recognized
-/// by LLVM, return a code that indicates how we should handle it.
-static SpecialGlobalClass getGlobalVariableClass(const GlobalVariable *GV) {
-  // If this is a global ctors/dtors list, handle it now.
-  if (GV->hasAppendingLinkage() && GV->use_empty()) {
-    if (GV->getName() == "llvm.global_ctors")
-      return GlobalCtors;
-    else if (GV->getName() == "llvm.global_dtors")
-      return GlobalDtors;
-  }
-
-  // Otherwise, if it is other metadata, don't print it.  This catches things
-  // like debug information.
-  if (GV->getSection() == "llvm.metadata")
-    return OtherMetadata;
-
-  return NotSpecial;
-}
-
-/// FindStaticTors - Given a static ctor/dtor list, unpack its contents into
-/// the StaticTors set.
-static void FindStaticTors(GlobalVariable *GV, std::set<Function*> &StaticTors){
-  ConstantArray *InitList = dyn_cast<ConstantArray>(GV->getInitializer());
-  if (!InitList) return;
-
-  for (unsigned i = 0, e = InitList->getNumOperands(); i != e; ++i)
-    if (ConstantStruct *CS = dyn_cast<ConstantStruct>(InitList->getOperand(i))){
-      if (CS->getNumOperands() != 2) return;  // Not array of 2-element structs.
-
-      if (CS->getOperand(1)->isNullValue())
-        return;  // Found a null terminator, exit printing.
-      Constant *FP = CS->getOperand(1);
-      if (ConstantExpr *CE = dyn_cast<ConstantExpr>(FP))
-        if (CE->isCast())
-          FP = CE->getOperand(0);
-      if (Function *F = dyn_cast<Function>(FP))
-        StaticTors.insert(F);
-    }
-}
-
+using namespace alf;
 
 namespace {
 
@@ -147,7 +108,43 @@ namespace {
       PrivateGlobalPrefix = "";
     }
   };
+  /// XXX: refactor
+  static SpecialGlobalClass getGlobalVariableClass(const GlobalVariable *GV) {
+    // If this is a global ctors/dtors list, handle it now.
+    if (GV->hasAppendingLinkage() && GV->use_empty()) {
+      if (GV->getName() == "llvm.global_ctors")
+        return GlobalCtors;
+      else if (GV->getName() == "llvm.global_dtors")
+        return GlobalDtors;
+    }
 
+    // Otherwise, if it is other metadata, don't print it.  This catches things
+    // like debug information.
+    if (GV->getSection() == "llvm.metadata")
+      return OtherMetadata;
+
+    return NotSpecial;
+  }
+
+  /// XXX: refactor
+  static void FindStaticTors(GlobalVariable *GV, std::set<Function*> &StaticTors){
+    ConstantArray *InitList = dyn_cast<ConstantArray>(GV->getInitializer());
+    if (!InitList) return;
+
+    for (unsigned i = 0, e = InitList->getNumOperands(); i != e; ++i)
+      if (ConstantStruct *CS = dyn_cast<ConstantStruct>(InitList->getOperand(i))){
+        if (CS->getNumOperands() != 2) return;  // Not array of 2-element structs.
+
+        if (CS->getOperand(1)->isNullValue())
+          return;  // Found a null terminator, exit printing.
+        Constant *FP = CS->getOperand(1);
+        if (ConstantExpr *CE = dyn_cast<ConstantExpr>(FP))
+          if (CE->isCast())
+            FP = CE->getOperand(0);
+        if (Function *F = dyn_cast<Function>(FP))
+          StaticTors.insert(F);
+      }
+  }
 
   /// ALFBackend - This class is the main chunk of code that converts an LLVM
   /// module to an ALF translation unit.
@@ -167,17 +164,20 @@ namespace {
 	/// ALFOutput for directly emmiting ALF code (should not be used anymore)
 	ALFOutput Output;
 
-    /// ALFWriter producing ALF code
-    ALFWriter Writer;
+    /// ALFBuilder for generating ALF code via a high level interface
+    ALFBuilder Builder;
+
+    /// ALFTranslator translating LLVM to ALF code
+    ALFTranslator Translator;
 
     /// translated module
     const Module *TheModule;
 
+    /// types used for volatile loads
+    SmallPtrSet<Type*,16> VolatileTypes;
+
     /// Loop Info
     LoopInfo *LI;
-
-    /* collections */
-    std::set<const Type*> VolatileTypes;
 
 	/* unique name generation and counters */
     unsigned FunctionCounter; // count the number of already generated functions to disambiguate labels
@@ -192,7 +192,8 @@ namespace {
         LeastAddrUnit(8), /* FIXME: Currently, the translator only works with LAU=8, but LLVM has 1-bit values */
         TD(0),  TCtx(0),TAsm(0), IL(0), Mang(0),
         Output(ostream, LeastAddrUnit),
-        Writer(Output, LeastAddrUnit, ALFIgnoreVolatiles),
+        Builder(Output),
+        Translator(Builder, LeastAddrUnit, ALFIgnoreVolatiles),
         TheModule(0),  LI(0),
         FunctionCounter(0), NextAnonValueNumber(0) {
       initializeLoopInfoPass(*PassRegistry::getPassRegistry());
@@ -207,21 +208,13 @@ namespace {
 
     virtual bool doInitialization(Module &M);
 
-    bool runOnFunction(Function &F) {
-     // Do not codegen any 'available_externally' functions at all, they have
-     // definitions outside the translation unit.
-     if (F.hasAvailableExternallyLinkage())
-       return false;
+    void processFunctionImports(Module &M);
 
-      LI = &getAnalysis<LoopInfo>();
+    void processGlobalVariables(Module &M);
 
-      // Get rid of intrinsics we can't handle
-      lowerIntrinsics(F);
+    void addBuiltinFunctions(Module &M);
 
-      visitFunction(F);
-      FunctionCounter++;
-      return false;
-    }
+    bool runOnFunction(Function &F);
 
     virtual bool doFinalization(Module &M);
 
@@ -239,6 +232,7 @@ namespace {
 
 char ALFBackend::ID = 0;
 
+// ALFBackend: Global Stuff
 bool ALFBackend::doInitialization(Module &M) {
   FunctionPass::doInitialization(M);
 
@@ -255,7 +249,7 @@ bool ALFBackend::doInitialization(Module &M) {
   TCtx = new MCContext(*TAsm, *MRI, NULL);
   Mang = new Mangler(*TCtx, *TD);
 
-  Writer.initializeTarget(TAsm, TD, MRI);
+  Translator.initializeTarget(TAsm, TD, MRI);
 
   // Lower unsupported intrinsic calls
   for (Module::iterator I = M.begin(), E = M.end(); I!=E; ++I) {
@@ -266,7 +260,7 @@ bool ALFBackend::doInitialization(Module &M) {
   addMemoryAreas(ALFMemoryAreas, false);
 
   // Set Bit Width
-  Output.setBitWidths(TD->getPointerSizeInBits(), TD->getPointerSizeInBits(), TD->getPointerSizeInBits());
+  Builder.setBitWidths(TD->getPointerSizeInBits(), TD->getPointerSizeInBits(), TD->getPointerSizeInBits());
 
   /// Emit global warnings, if any
 
@@ -287,260 +281,161 @@ bool ALFBackend::doInitialization(Module &M) {
     }
   }
 
-  // Volatile 'variables'
-  std::map<std::string, unsigned> VolatileStorage;
-
-  Output.startList("alf");
-
-  // First output all the declarations for the program, because C requires
-  // Functions & globals to be declared before they are used.
-  //
+  // Set properties
+  Builder.setLittleEndian(TD->isLittleEndian());
 
   // TODO: Handle inline assembler
   // see C backend /!M.getModuleInlineAsm().empty()/
 
-  // Loop over the symbol table, emitting all named constants (Not supported/needed in ALF)
+  processFunctionImports(M);
 
-  Output.startList("macro_defs");
-  // Output.macroDefs();
-  Output.endList("macro_defs");
+  processGlobalVariables(M);
 
-  Output.lauDef();
-  Output.atom(TD->isLittleEndian() ? "little_endian" : "big_endian");
+  addBuiltinFunctions(M);
 
-  Output.startList("exports");
-
-  // Global variable exports
-  Output.startList("frefs");
-
-  if (!M.global_empty()) {
-    for (Module::global_iterator I = M.global_begin(), E = M.global_end();
-         I != E; ++I)
-      if (!I->isDeclaration()) {
-        // Ignore special globals, such as debug info.
-        if (I->getSection() == "llvm.metadata") // getGlobalVariableClass(I))
-          continue;
-
-        // Thread Local Storage (TODO?)
-        if (I->isThreadLocal())
-            errs() << "Warning: ALF backend does not support thread-local storage\n";
-        if (I->hasHiddenVisibility())
-            errs()  << "Warning: Ignoring hidden visibility\n";
-
-        if (I->hasLocalLinkage())
-          continue;
-
-        // if (I->isThreadLocal())
-        Output.fref(Writer.getValueName(I));
-
-        if (I->hasLinkOnceLinkage()) // (TODO)
-          errs()  << "Warning: Ignoring LinkOnceLinkage\n";
-        if (I->hasCommonLinkage())    // FIXME is this right?
-          /* errs()  << "Warning: Ignoring CommonLinkage\n" */ ;
-        else if (I->hasWeakLinkage())
-            errs()  << "Warning: Ignoring WeakLinkage\n";
-        else if (I->hasExternalWeakLinkage())
-            errs()  << "Warning: Ignoring ExternalWeakLinkage\n";
-      }
-  }
-  Output.endList("frefs");
-
-  Output.startList("lrefs");
-  for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
-
-    // TODO: Special Linkage
-    // C Backend, s/StaticCtors.count(I)/
-
-    if (!I->isDeclaration()) {
-        if (I->hasName() && I->getName()[0] == 1)
-            errs() << "cannot handle LLVM_ASM at the moment";
-        Output.lref(Writer.getValueName(I));
-    }
-
-  }
-  Output.endList("lrefs");
-  Output.endList("exports");
-
-  Output.startList("imports");
-  Output.startList("frefs");
-
-  // External Global variable declarations (frame refs)
-  if (!M.global_empty()) {
-    for (Module::global_iterator I = M.global_begin(), E = M.global_end();
-         I != E; ++I) {
-      if(I->isDeclaration()) {
-          Output.fref(Writer.getValueName(I));
-      }
-      // TODO: Process Linkage (C Backend, s/else if (I->hasDLLImportLinkage())/)
-    }
-  }
-  if(!ALFStandalone) {
-      // Import Null-Pointer 'variable'
-      Output.fref(ALFWriter::NULL_REF);
-      // Import frames for memory areas addressed in an absolute way
-      if(Writer.mem_areas_begin() == Writer.mem_areas_end()) {
-          Output.fref(ALFWriter::ABS_REF);
-      } else {
-          for(ALFWriter::mem_areas_iterator I = Writer.mem_areas_begin(),E = Writer.mem_areas_end();
-                  I!=E; ++I) {
-              Output.fref(I->getName());
-          }
-      }
-  }
-  Output.endList("frefs");
-  Output.startList("lrefs");
-
-  for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
-	  // If function is not defined and not an intrinsic, we either need to import it or generate a stub
-	  // TODO Linkage, intrinsic function and LLVM_ASM (name starts with 1)
-	  if(I->isDeclaration() && !I->isIntrinsic()) {
-		  if(!ALFStandalone) {
-			  // Print declaration for undefined function
-			  Output.lref(Writer.getValueName(I));
-		  } else {
-			  // Add volatile storage for return values of undefined function stubs
-			  Type *VTy = I->getReturnType();
-			  VolatileTypes.insert(VTy);
-			  VolatileStorage.insert(make_pair(Writer.getVolatileStorage(VTy), Writer.getBitWidth(VTy)));
-		  }
-	  }
-  }
-  Output.endList("lrefs");
-  Output.endList("imports");
-
-  Output.startList("decls");
-
-  if(ALFStandalone) {
-      // Define Null-Pointer 'variable'
-      Output.alloc(ALFWriter::NULL_REF, TD->getPointerSizeInBits());
-      // Define absolute Memory
-      if(Writer.mem_areas_begin() == Writer.mem_areas_end()) {
-          Output.startList("alloc");
-          Output.atom(TD->getPointerSizeInBits());
-          Output.identifier(ALFWriter::ABS_REF);
-          Output.atom("inf");
-          Output.endList("alloc");
-      } else {
-          for(ALFWriter::mem_areas_iterator I = Writer.mem_areas_begin(), E = Writer.mem_areas_end();
-                  I!=E; ++I) {
-              Output.alloc(I->getName(), I->sizeInBits());
-          }
-      }
-  }
-
-  // Collect volatile memory loads
-  for(Module::iterator If = M.begin(), Ef = M.end(); If != Ef; ++If) {
-	  for(Function::iterator Ib = *If->begin(), Eb = *If->end(); Ib != Eb; ++Ib) {
-		  for(BasicBlock::iterator Ii = *Ib->begin(), Ei = *Ib->end(); Ii != Ei; ++Ii) {
-			  // Inspect all volatile loads
-			  if(const LoadInst* LIns = dyn_cast<LoadInst>(&*Ii)) {
-				  if(LIns->isVolatile()) {
-					  Type *VTy = LIns->getType();
-					  VolatileTypes.insert(VTy);
-					  VolatileStorage.insert(make_pair(Writer.getVolatileStorage(VTy), Writer.getBitWidth(VTy)));
-				  }
-			  }
-		  }
-	  }
-  }
-
-  for(std::map<std::string, unsigned>::iterator I = VolatileStorage.begin(), E= VolatileStorage.end(); I!=E; ++I) {
-	  Output.alloc(I->first, I->second);
-  }
-
-  // Global variable declarations
-  if (!M.global_empty()) {
-    for (Module::global_iterator I = M.global_begin(), E = M.global_end();
-         I != E; ++I)
-      if (!I->isDeclaration()) {
-        // Ignore special globals, such as debug info.
-        if (getGlobalVariableClass(I))
-          continue;
-
-        unsigned size = Writer.getBitWidth(I->getType()->getElementType()); // in bits
-        Output.alloc(Writer.getValueName(I), size);
-
-        //  dbgs() << "Determining type: "; I->getType()->getElementType()->print(dbgs());
-        //  dbgs() << " has size " << size << '\n';
-      }
-  }
-
-  Output.endList("decls");
-
-  Output.startList("inits");
-
-  // Initialize volatile storage
-  for(std::map<std::string, unsigned>::iterator I = VolatileStorage.begin(), E= VolatileStorage.end(); I!=E; ++I) {
-	  Output.startList("init");
-	  Output.ref(I->first, 0);
-	  Output.startList("const_repeat",true);
-	  /* Initialize with 0-values in chunks of size LAU */
-	  if(I->second < LeastAddrUnit) {
-	      Output.dec_unsigned(I->second, APInt(I->second,0,false));
-	      Output.atom(utostr(1));
-	  } else {
-          Output.dec_unsigned(LeastAddrUnit, APInt(LeastAddrUnit,0,false));
-          Output.atom(utostr(I->second / LeastAddrUnit));
-	  }
-	  Output.endList("const_repeat");
-	  Output.atom("volatile");
-	  Output.endList("init");
-  }
-
-  // Output the global variable definitions and contents
-  if (!M.global_empty()) {
-    for (Module::global_iterator I = M.global_begin(), E = M.global_end();
-         I != E; ++I)
-      if (!I->isDeclaration()) {
-        // Ignore special globals, such as debug info.
-        if (getGlobalVariableClass(I))
-          continue;
-
-        // const -> read_only
-
-        // If the initializer is not null, emit the initializer.  If it is null,
-        // we still need to initialize the memory to zero.
-        // XXX: We do not support weak linkage (see C Backend, /} else if (I->hasWeakLinkage()) {/)
-        Writer.emitInitializers(M, *I, 0, I->getInitializer());
-     }
-  }
-  Output.endList("inits");
-
-  Output.startList("funcs");
-
-  // Emit implementations for undefined functions (which are only declared but not defined),
-  // returning TOP
-  if(ALFStandalone) {
-	  for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
-		  // If function is not defined and not an intrinsic, we either need to import it or generate a stub
-		  // TODO Linkage / LLVM_ASM (name starts with 1)
-		  if(! F->isDeclaration() || F->isIntrinsic()) continue;
-		  Output.newline();
-		  Output.comment("-------------------- STUB FOR UNDEFINED FUNCTION " + F->getName().str() + " --------------------");
-		  Output.startList("func");
-		  Writer.emitFunctionSignature(F);
-		  Output.startList("scope");
-		  Output.startList("decls"); Output.endList("decls");
-		  Output.startList("inits"); Output.endList("inits");
-		  Output.startList("stmts");
-		  Output.setStmtLabel(F->getName().str() + "::stub");
-		  Output.startStmt("return");
-		  Type *RTy = F->getReturnType();
-		  Output.load(Writer.getBitWidth(RTy),Writer.getVolatileStorage(RTy),0);
-		  Output.endStmt("return");
-		  Output.endList("stmts");
-		  Output.endList("scope");
-		  Output.endList("func");
-	  }
-  }
-
-  // C backend: s/Emit some helper functions for dealing with FCMP instruction's predicates/
   return false;
 }
 
+// Function Imports
+// If function is not defined and not an intrinsic, we either need to import it or generate a stub
+// TODO: Process Linkage Information [1]
+// TODO: Handle LLVM_ASM (name starts with 1)
+void ALFBackend::processFunctionImports(Module &M) {
+    for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
+        if(I->isDeclaration() && !I->isIntrinsic()) {
+            if(!ALFStandalone) {
+                std::string Label = Translator.getValueName(I);
+                Builder.importLabel(Label);
+            } else {
+                // Add volatile storage for return values of undefined function stubs
+                VolatileTypes.insert(I->getReturnType());
+            }
+        }
+    }
+}
+
+// Global variables (import or definition/export)\
+// TODO: We should consider special linkage information, such as:
+//   ==> thread Local, hidden visibility, link once, weak, external weak, common linkage
+// TODO: const == read-only? (currently ignored)
+void ALFBackend::processGlobalVariables(Module &M) {
+
+    // Global Variables Imports / Definitions
+    if (!M.global_empty()) {
+      for (Module::global_iterator I = M.global_begin(), E = M.global_end();
+           I != E; ++I) {
+          // Ignore debug info
+          if (I->getSection() == "llvm.metadata")
+            continue;
+          // add frame
+          bool IsImported = I->isDeclaration();
+          bool IsExported = ! I->hasLocalLinkage();
+          FrameStorage Storage = IsImported ? ImportedFrame : (IsExported ? ExportedFrame : InternalFrame);
+          unsigned SizeInBits = Translator.getBitWidth(I->getType()->getElementType());
+          Builder.addFrame(Translator.getValueName(I), SizeInBits, Storage);
+          // All global variables (which are not special purpose) need to be initialized
+          // The initializer, however, is allowed to be NULL
+          if(! IsImported && !getGlobalVariableClass(I)) {
+              Translator.emitInitializers(M, *I, 0, I->getInitializer());
+          }
+      }
+    }
+
+    FrameStorage SpecialStorage = ALFStandalone ? InternalFrame : ImportedFrame;
+
+    // Define/Import Null-Pointer variables
+    Builder.addFrame(ALFTranslator::NULL_REF, TD->getPointerSizeInBits(), SpecialStorage);
+
+    // Define absolute Memory
+    if(Translator.mem_areas_begin() == Translator.mem_areas_end()) {
+        Builder.addInfiniteFrame(ALFTranslator::ABS_REF, SpecialStorage);
+    } else {
+        for(ALFTranslator::mem_areas_iterator I = Translator.mem_areas_begin(), E = Translator.mem_areas_end();
+                I!=E; ++I) {
+            Builder.addFrame(I->getName(), I->sizeInBits(), SpecialStorage);
+        }
+    }
+
+    // Collect volatile memory loads
+    std::map<std::string, unsigned> VolatileStorage;
+    for(Module::iterator If = M.begin(), Ef = M.end(); If != Ef; ++If) {
+        for(Function::iterator Ib = *If->begin(), Eb = *If->end(); Ib != Eb; ++Ib) {
+            for(BasicBlock::iterator Ii = *Ib->begin(), Ei = *Ib->end(); Ii != Ei; ++Ii) {
+                // Inspect all volatile loads
+                if(const LoadInst* LIns = dyn_cast<LoadInst>(&*Ii)) {
+                    if(LIns->isVolatile()) {
+                        Type *VTy = LIns->getType();
+                        VolatileTypes.insert(VTy);
+                        VolatileStorage.insert(make_pair(Translator.getVolatileStorage(VTy), Translator.getBitWidth(VTy)));
+                    }
+                }
+            }
+        }
+    }
+
+    // Add volatile variables
+    for(std::map<std::string, unsigned>::iterator I = VolatileStorage.begin(), E= VolatileStorage.end(); I!=E; ++I) {
+        Builder.addFrame(I->first, I->second, InternalFrame);
+        bool Volatile = true;
+        SExpr *Zero;
+        uint64_t Repeats;
+        /* Initialize with 0-values in chunks of size LAU */
+        if(I->second < LeastAddrUnit) {
+            Zero = Builder.dec_unsigned(I->second, 0);
+            Repeats = 1;
+        } else {
+            Zero = Builder.dec_unsigned(LeastAddrUnit, 0);
+            Repeats = I->second / LeastAddrUnit;
+        }
+        Builder.addInit(I->first, 0, Builder.const_repeat(Zero, Repeats), Volatile);
+    }
+}
+
+
+// Emit implementations for undefined functions (which are only declared but not defined),
+// returning TOP (in ALFStandalone mode)
+void ALFBackend::addBuiltinFunctions(Module &M) {
+    if(ALFStandalone) {
+        for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
+            // If function is not defined and not an intrinsic, we either need to import it or generate a stub
+            // TODO Linkage / LLVM_ASM (name starts with 1)
+            if(! F->isDeclaration() || F->isIntrinsic()) continue;
+            ALFFunction *AF = Builder.addFunction(F->getName(), Translator.getValueName(F), "STUB for undefined function " + F->getName());
+            Type *RTy = F->getReturnType();
+            SExpr *Z = Builder.load(Translator.getBitWidth(RTy), Builder.address(Translator.getVolatileStorage(RTy)));
+            ALFStatementGroup* Block = AF->addBasicBlock(F->getName() + "::entry", "Generated Basic Block (return undef)");
+            Block->addStatement(F->getName() + "::entry::0", "return undef", Builder.ret(Z));
+        }
+    }
+}
+
+bool ALFBackend::runOnFunction(Function &F) {
+ // Do not codegen any 'available_externally' functions at all, they have
+ // definitions outside the translation unit.
+ if (F.hasAvailableExternallyLinkage())
+   return false;
+
+  LI = &getAnalysis<LoopInfo>();
+
+  // Get rid of intrinsics we can't handle
+  lowerIntrinsics(F);
+
+  visitFunction(F);
+  FunctionCounter++;
+  return false;
+}
+
+/// Generate ALF code for function
+/// TODO: isStructReturn - Should this function actually return a struct by-value?
+///        In ALF, we probably flatten this into multiple return values
+void ALFBackend::visitFunction(Function &F) {
+  ALFFunction *AF = Builder.addFunction(F.getName(), Translator.getValueName(&F), "Definition of function " + F.getName());
+  AF->setExported(! F.hasLocalLinkage());
+  Translator.translateFunction(&F, AF);
+}
+
 bool ALFBackend::doFinalization(Module &M) {
-  Output.endList("funcs");
-  Output.endList("alf");
+  Builder.writeToFile(Output);
   // Free memory...
   delete IL;
   delete TD;
@@ -550,113 +445,6 @@ bool ALFBackend::doFinalization(Module &M) {
   return false;
 }
 
-void ALFBackend::visitFunction(Function &F) {
-  /// isStructReturn - Should this function actually return a struct by-value?
-  /// In ALF, we probably flatten this into multiple return values
-  bool isStructReturn = F.hasStructRetAttr();
-
-  Output.newline();
-  Output.comment("-------------------- FUNCTION " + F.getName().str() + " --------------------");
-  Output.startList("func");
-
-  Writer.emitFunctionSignature(&F);
-
-  // start function scope
-  Output.startList("scope"); // DECLS INITS STMTS
-
-  // declare local variables
-  Output.startList("decls");
-
-  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ++I) {
-
-    // We need local variables for:
-	//  - PHI nodes
-	//  - non-inlineable instructions
-	//  - The condition of branch and switch statements
-	//  - Alloca memory with fixed size
-    // We do not need to initialize variables here
-    //
-	Value* NeedsStore = 0;
-	string Reason;
-    if(isa<PHINode>(*I)) {
-      NeedsStore = &*I;
-      Reason     = "Local Variable (PHI node)";
-    } else if (I->getType() != Type::getVoidTy(F.getContext()) &&
-               !Writer.isInlinableInst(*I)) {
-      NeedsStore = &*I;
-      Reason     = "Local Variable (Non-Inlinable Instruction)";
-    }
-    if(NeedsStore) {
-    	Output.alloc(Writer.getValueName(NeedsStore), Writer.getBitWidth(NeedsStore->getType()));
-    	Output.comment(Reason);
-    }
-    if (const AllocaInst *AI = isStaticSizeAlloca(&*I)) {
-    	const ConstantInt* ArraySize = cast<ConstantInt>(AI->getArraySize());
-    	Type* ElTy = AI->getType()->getElementType();
-    	Output.alloc(Writer.getValueName(AI), Writer.getBitWidth(ElTy) * ArraySize->getLimitedValue());
-    	Reason = "alloca'd memory";
-    	Output.comment(Reason);
-    }
-    // C Backend: uses extra temporary for bitcasts.
-    // Currently we cannot support all bitcasts, as we do not know the details of the
-    // architecture/ABI (i.e., alignment of composite type members)
-  }
-
-  Output.endList("decls");
-  Output.startList("inits");
-  Output.endList("inits");
-  // print the basic blocks
-  Output.startList("stmts");
-  for (Function::iterator BB = F.begin(), E = F.end(); BB != E; ++BB) {
-    visitBasicBlock(BB);
-  }
-  Output.endList("stmts");
-  Output.endList("scope");
-
-  // C Backend: If this is a struct return function, handle the result with magic.
-  // Applies to ALF as well
-  if (isStructReturn) {
-    errs() << "We cannot handle struct returns yet\n";
-    // const Type *StructTy =
-    //   cast<PointerType>(F.arg_begin()->getType())->getElementType();
-    // printType(Out, StructTy, false, "StructReturn");
-    // Out << ";  /* Struct return temporary */\n";
-    // printType(Out, F.arg_begin()->getType(), false,
-    //           Writer.getValueName(F.arg_begin()));
-    // Out << " = &StructReturn;\n";
-  }
-  Output.endList("func");
-}
-
-void ALFBackend::visitBasicBlock(BasicBlock *BB) {
-
-  /// Print Label
-  Writer.basicBlockHeader(BB);
-  unsigned Ix = 0;
-  // Output all of the instructions in the basic block...
-  for (BasicBlock::iterator II = BB->begin(), E = BB->end(); II != E;
-       ++Ix, ++II) {
-    // Do not emit code for PHI nodes / debug instructions
-    if (isa<PHINode>(*II) || isa<DbgInfoIntrinsic>(*II)) {
-        continue;
-    }
-
-    // code for inlinable instructions is emitted at the use site
-    if (Writer.isInlinableInst(*II)) {
-        continue;
-    }
-
-    Writer.statementHeader(*II, Ix);
-    if(Writer.isExpressionInst(*II)) {
-        Writer.emitTemporaryStore(II);
-    } else {
-        Writer.visit(*II);
-    }
-
-  }
-
-  Output.decrementIndent();
-}
 
 void ALFBackend::addMemoryAreas(std::string& AreaSpec, bool IsVolatile)
 {
@@ -673,7 +461,7 @@ void ALFBackend::addMemoryAreas(std::string& AreaSpec, bool IsVolatile)
 					             StartEnd.first + " to " + StartEnd.second +
 					             " is not a pair of valid addresses.");
 		  }
-		  Writer.addMemoryArea((uint64_t)Start, (uint64_t)End, IsVolatile);
+		  Translator.addMemoryArea((uint64_t)Start, (uint64_t)End, IsVolatile);
 	}
 }
 
@@ -747,22 +535,19 @@ void ALFBackend::lowerIntrinsics(Function &F) {
 //                       External Interface declaration
 //===----------------------------------------------------------------------===//
 
+// TODO should we run GCLowering / LowerInvoke passes?
 bool ALFTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
                                          formatted_raw_ostream &o,
                                          CodeGenFileType FileType,
                                          bool DisableVerify) {
   if (FileType != TargetMachine::CGFT_AssemblyFile) return true;
 
-  // TODO: taken from the C backend. We should not support GC/unwind, and simply emit
-  // an error if it is used
-  // PM.add(createGCLoweringPass());
-  // PM.add(createLowerInvokePass());
-
   // Do not simplify CFG by default, as it is difficult to predict the translation this way
   // PM.add(createCFGSimplificationPass());   // clean up after lower invoke.
 
   // add ALFBackend pass
   PM.add(new ALFBackend(o));
-  // PM.add(createGCInfoDeleter());
   return false;
 }
+
+

@@ -25,6 +25,8 @@
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/InstVisitor.h"
 
+#include "SExpr.h"
+
 using namespace std;
 using namespace llvm;
 
@@ -69,7 +71,7 @@ namespace llvm {
 
           unsigned getBitsFRef()   { return BitsFRef; }
           unsigned getBitsOffset() { return BitsOffset; }
-
+          unsigned getLeastAddrUnit() { return LeastAddrUnit; }
           void setBitWidths(unsigned bitsFRef,unsigned bitsLRef, unsigned bitsOffset) {
               BitsFRef = bitsFRef;
               BitsLRef = bitsLRef;
@@ -105,7 +107,7 @@ namespace llvm {
           }
 
           /// start an S-Expression list; only use this if no specific builder instruction is available
-          void startList(string Cmd, bool Oneline = false) {
+          void startList(const string& Cmd, bool Oneline = false) {
               NamedListStack.push_back(Cmd);
               if(Oneline) {
                   LayoutStack.push_back(StateLayout);
@@ -119,11 +121,15 @@ namespace llvm {
           }
 
           /// end an S-Expression; Cmd is used to validate the nesting
-          void endList(string Cmd) {
+          void endList(const string& Cmd) {
+              if(NamedListStack.empty()) {
+                  errs() << "[llvm2alf] Internal Error: Detected Inconsistence when producing ALF code: TOS=[] in endList\n";
+                  assert(0 && "[llvm2alf] endList: ! NamedListStack.empty");
+              }
               string Top = NamedListStack.back();
               if(Top != Cmd) {
-                  errs() << "Detected Inconsistency when producing ALF code: TOS=" << Top << ", but expected " << Cmd << '\n';
-                  assert(0 && "Top == Cmd");
+                  errs() << "[llvm2alf] Internal Error: Detected Inconsistency when producing ALF code: TOS=" << Top << ", but expected " << Cmd << '\n';
+                  assert(0 && "[llvm2alf] endList:Top == Cmd");
               }
               NamedListStack.pop_back();
               --Indent;
@@ -182,7 +188,8 @@ namespace llvm {
           }
 
           /// ALF has C-Style comments
-          void comment(const string& Comment, bool Inline = true) {
+          void comment(const Twine& comment, bool Inline = true) {
+              std::string Comment = comment.str(); // XXX: probably unefficient
               if(!Inline) {
                   Out << '\n';
                   for(unsigned i = 0; i < Indent && i < MaxIndent; ++i) Out << ' ';
@@ -204,6 +211,28 @@ namespace llvm {
               }
           }
 
+          // recursive printing of SExprs
+          void sexpr(alf::SExpr *SE) {
+              if(alf::SExprList* List = SE->asList()) {
+                  alf::SExprList::list_iterator I = List->begin(), E = List->end();
+                  if(I == E) {
+                      report_fatal_error("Invalid ALF SExpr: empty list");
+                  } else if(alf::SExprAtom *ListHead = (*I)->asAtom()) {
+                      startList(ListHead->getValue(), List->isInline());
+                      I++;
+                      while(I != E) {
+                          sexpr(*I++);
+                      }
+                      endList(ListHead->getValue());
+                  } else {
+                      report_fatal_error("Invalid ALF SExpr: list head not an atom");
+                  }
+              } else {
+                  alf::SExprAtom* Atom = SE->asAtom();
+                  atom(Atom->getValue());
+              }
+          }
+          // Stuff below here will be move to ALFContext/ALFBuilder eventually
           void undefined(unsigned BitWidth) {
             startList("undefined",true);
             atom(BitWidth);
@@ -216,8 +245,8 @@ namespace llvm {
             endList("least_addr_unit");
           }
 
-          void fref(string Id) {
-              startList("fref",true);
+          void fref(const StringRef Id, bool OneLine=true) {
+              startList("fref", OneLine);
               atom(BitsFRef);
               identifier(Id);
               endList("fref");
@@ -237,14 +266,14 @@ namespace llvm {
               endList("addr");
           }
 
-          void lref(string Id) {
-              startList("lref", true);
+          void lref(string Id, bool OneLine = true) {
+              startList("lref", OneLine);
               atom(BitsLRef);
               identifier(Id);
               endList("lref");
           }
 
-          void labelRef(string Id, uint64_t offs = 0) {
+          void labelRef(const string& Id, uint64_t offs = 0) {
               if(UseMacros && offs == 0) {
                   startList("!slabel", true);
                   identifier(Id);

@@ -1,4 +1,4 @@
-//===-- ALFWriter.cpp - Library for converting LLVM code to ALF (Artist2 Language for Flow Analysis) --------------===//
+//===-- ALFTranslator.cpp - Library for converting LLVM code to ALF (Artist2 Language for Flow Analysis) --------------===//
 //
 //                     Benedikt Huber, <benedikt@vmars.tuwien.ac.at>
 //                     Adapted from the C Backend (The LLVM Compiler Infrastructure)
@@ -8,22 +8,27 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// The ALFWriter class is responsible for generating ALF code, and is usually
-// used by the ALFWriter class, which traverses the input module
+// The ALFTranslator class is responsible for generating ALF code, and is usually
+// used by the ALFTranslator class, which traverses the input module
 //
 //===----------------------------------------------------------------------===//
 
 #include "ALFOutput.h"
-#include "ALFWriter.h"
+#include "ALFTranslator.h"
+#include "llvm/IntrinsicInst.h"
 #include "llvm/Analysis/DebugInfo.h"
 #include "llvm/Support/CallSite.h"
+#include "llvm/Support/InstIterator.h"
 
-const string ALFWriter::NULL_REF("$null");
-const string ALFWriter::ABS_REF("$mem");
-const string ALFWriter::ABS_REF_PREFIX("$mem_");
+#define DEBUG_TYPE "ALF"
+#include "llvm/Support/Debug.h"
 
 
-void llvm::alf_fatal_error(const string& Reason, Instruction& Ins) {
+const string ALFTranslator::NULL_REF("$null");
+const string ALFTranslator::ABS_REF("$mem");
+const string ALFTranslator::ABS_REF_PREFIX("$mem_");
+
+void llvm::alf_fatal_error(const Twine& Reason, Instruction& Ins) {
     DebugLoc Loc = Ins.getDebugLoc();
     DISubprogram SubProgram;
     if(MDNode* Scope = Loc.getScope(Ins.getContext())) {
@@ -51,7 +56,180 @@ void llvm::alf_fatal_error(const string& Reason, Instruction& Ins) {
     report_fatal_error("[llvm2alf] Error: " + Reason);
 }
 
-void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Constant* Const) {
+void llvm::alf_fatal_error(const Twine& Reason, const Type& Ty) {
+    report_fatal_error("[llvm2alf] Error: " + Reason + " for Type " + typeToString(Ty));
+}
+
+void llvm::alf_fatal_error(const Twine& Reason, const Function* F) {
+    Twine ContextStr;
+    if(F) {
+       ContextStr = " in Function " + F->getName();
+    }
+    report_fatal_error("[llvm2alf] Error: " + Reason + ContextStr);
+}
+
+void llvm::alf_warning(const Twine& Msg) {
+    errs() << "[llvm2alf] Warning: " << Msg << "\n";
+}
+
+/// Translator Interface
+void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
+
+    this->AF = AF;
+    processFunctionSignature(F, AF);
+
+    for (const_inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
+
+        // We need local variables for:
+        //  - PHI nodes
+        //  - non-inlineable instructions
+        //  - The condition of branch and switch statements
+        //  - Alloca memory with fixed size
+        const Value* StatementIns = &*I;
+        Twine Reason;
+        if(isa<PHINode>(*I)) {
+            Reason     = "Local Variable (PHI node)";
+        } else if (I->getType() != Type::getVoidTy(F->getContext()) && !isInlinableInst(*I)) {
+            Reason     = "Local Variable (Non-Inlinable Instruction)";
+        } else {
+            StatementIns = 0;
+        }
+        if(StatementIns) {
+            AF->addLocal(getValueName(StatementIns), getBitWidth(StatementIns->getType()), Reason);
+        }
+        if (const AllocaInst *AI = isStaticSizeAlloca(&*I)) {
+            const ConstantInt* ArraySize = cast<ConstantInt>(AI->getArraySize());
+            Type* ElTy = AI->getType()->getElementType();
+            AF->addLocal(getValueName(AI), getBitWidth(ElTy) * ArraySize->getLimitedValue(), "alloca'd memory");
+        }
+    }
+    // We do not need to initialize local variables
+    // translate the basic blocks
+    for (Function::const_iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
+        processBasicBlock(BB, AF);
+    }
+
+    // XXX: Support struct returns
+    bool isStructReturn = F->hasStructRetAttr();
+    if (isStructReturn) {
+        alf_fatal_error("We cannot handle struct returns yet",F);
+        // const Type *StructTy =
+        //   cast<PointerType>(F.arg_begin()->getType())->getElementType();
+        // printType(Out, StructTy, false, "StructReturn");
+        // Out << ";  /* Struct return temporary */\n";
+        // printType(Out, F.arg_begin()->getType(), false,
+        //           getValueName(F.arg_begin()));
+        // Out << " = &StructReturn;\n";
+    }
+}
+
+// emit function signature {func LABEL ARG_DECLS SCOPE}
+// FIXME: Ignoring calling conventions and linkage
+// FIXME: We do not support varargs
+void ALFTranslator::processFunctionSignature(const Function *F, ALFFunction *AF) {
+
+    // Loop over the arguments, printing them...
+    const FunctionType *FT = cast<FunctionType>(F->getFunctionType());
+
+    // Add formal parameters
+    if (FT->isVarArg()) {
+        alf_fatal_error("processFunctionSignature(): variable argument lists are not supported", F);
+    } else if (! F->arg_empty()) {
+        const AttrListPtr &PAL = F->getAttributes();
+        unsigned Idx = 1;
+        for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E; ++I) {
+            if (PAL.paramHasAttr(Idx, Attribute::ByVal)) {
+                alf_warning("Attribute::ByVal ignored" + typeToString(*FT));
+            }
+            AF->addFormal(getValueName(I), getBitWidth(I->getType()));
+            ++Idx;
+        }
+    }
+}
+// FIXME: BBconst is morally const, but our interfaces do not match
+void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AF) {
+    BasicBlock *BB = const_cast<BasicBlock*>(BBconst);
+    CurrentBlock = AF->addBasicBlock(getBasicBlockLabel(BB), "Basic Block " + BB->getName());
+
+    // Output all of the instructions in the basic block...
+    unsigned Index = 0;
+    for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ++II) {
+        CurrentStatementIndex = Index++;
+        // Do not emit code for PHI nodes, debug instructions or inlineable instructions
+        if (isa<PHINode>(*II) || isa<DbgInfoIntrinsic>(*II), isInlinableInst(*II)) {
+            continue;
+        }
+        if(isExpressionInst(*II)) {
+            // Store the value of the instruction in a temporary
+            // ALF variable. Directly *after* the store, the value
+            // of emitLoad(I) is equivalent to emitExpression(I)
+            SExpr *Store = AF->store(AF->atom(getValueName(&*II)), buildExpression(&*II));
+            addStatement(*II, CurrentStatementIndex, Store);
+        } else {
+            visit(*II);
+        }
+
+    }
+}
+
+/// Add the ALF statement for the specified instruction to the current basic group
+void ALFTranslator::addStatement(const Instruction& Ins, unsigned Index, SExpr *Code) {
+    Twine Comment = "Statement: " + getInstructionLabel(Ins.getParent(), Index) + "\n";
+    std::vector<const Instruction *> InsList;
+    getStatementInstructions(Ins,InsList);
+    for(std::vector<const Instruction*>::const_reverse_iterator II = InsList.rbegin(), IE = InsList.rend(); IE != II; ++ II) {
+        Comment = Comment + " " + valueToString(**II) + "\n";
+    }
+    CurrentBlock->addStatement(getInstructionLabel(Ins.getParent(), Index), Comment, Code);
+}
+
+// Collect all LLVM instructions combined in the ALF statement for the given instruction
+// Note that the dependency relation is acyclic as no PHI nodes are inlined
+void ALFTranslator::getStatementInstructions(const Instruction& Ins, std::vector<const Instruction*> &InsList) {
+    std::vector<const Instruction *> Worklist;
+    Worklist.push_back(&Ins);
+    while(! Worklist.size() == 0) {
+        const Instruction *UsedIns = Worklist.back();
+        Worklist.pop_back();
+        InsList.push_back(UsedIns);
+        for(Instruction::const_op_iterator OI = UsedIns->op_begin(), OE = UsedIns->op_end(); OI != OE; ++OI) {
+            if(Instruction* Op = dyn_cast<Instruction>(OI)) {
+                if(isa<PHINode>(Op)) continue;
+                if(! isInlinableInst(*Op)) continue;
+                Worklist.push_back(Op);
+            }
+        }
+    }
+}
+
+/// Note: Emit Operand will use use a local variable if the value
+/// is neither inlineable nor a constant
+/// cf. C Backend: has a Static parameter, which we removed
+SExpr* ALFTranslator::buildExpression(Value *Operand) {
+
+    Instruction *I;
+    Constant* CPV;
+    // TODO: implement
+    SExpr *E;
+
+    if((I = dyn_cast<Instruction>(Operand)) != 0) {
+        BuiltExpr = 0;
+        visit(I);
+        if(BuiltExpr == 0) {
+            alf_fatal_error("buildExpression(): visitor does not produce expression");
+        }
+        E = BuiltExpr;
+    } else if((CPV = dyn_cast<Constant>(Operand)) != 0) {
+        E = buildConstant(CPV);
+    } else {
+        alf_fatal_error("emitExpression(): Neither Constant nor Instruction: " + valueToString(*Operand));
+    }
+    return E;
+}
+
+
+/// Intializers
+void ALFTranslator::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Constant* Const) {
 
 	Type *Ty = Const->getType();
     // Omit undef initializers (undefined is default)
@@ -67,7 +245,7 @@ void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffse
 			} else if(const VectorType *VecTy = dyn_cast<VectorType>(SeqTy)) {
 				NumElems = VecTy->getNumElements();
 			} else {
-				report_fatal_error("Unexpected Constant Aggregate Zero for type different from Array or Vector: " + typeToString(*SeqTy));
+				alf_fatal_error("Unexpected ConstantAggregateZero for type different from Array or Vector", *SeqTy);
 			}
 			for(unsigned Ix = 0; Ix < NumElems; Ix++) {
 				Constant* SubConstZero = Constant::getNullValue(SeqTy->getElementType());
@@ -80,7 +258,7 @@ void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffse
 				emitInitializers(M,V,BitOffset + getBitOffset(StructTy, Ix++), SubConstZero);
 			}
 		} else {
-		    report_fatal_error ("[llvm2alf] emitInitializers(): Unknown composite type for ConstantAggregateZero:" + typeToString(*Ty));
+		    alf_fatal_error("emitInitializers(): Unknown composite type for ConstantAggregateZero:", *Ty);
 		}
 		return;
     }
@@ -102,14 +280,14 @@ void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffse
     		if(hasSimpleInitializer(ConstExpr)) {
     			emitInitializer(V, BitOffset, ConstExpr);
     		} else {
-    	        report_fatal_error("[llvm2alf] emitIntializers(): Unsupported Constant Pointer Expression: " + valueToString(*ConstExpr));
+    	        alf_fatal_error("emitIntializers(): Unsupported Constant Pointer Expression: " + valueToString(*ConstExpr));
     		}
     	} else if(isa<Function>(Const)) {
     		emitInitializer(V, BitOffset, cast<Function>(Const));
         } else if(isa<BlockAddress>(Const)) {
             emitInitializer(V, BitOffset, cast<BlockAddress>(Const));
         } else {
-    		report_fatal_error("[llvm2alf] emitIntializers(): Unsupported Pointer Constant: " + valueToString(*Const));
+    		alf_fatal_error("emitIntializers(): Unsupported Pointer Constant: " + valueToString(*Const));
     	}
     	return;
     }
@@ -148,17 +326,17 @@ void ALFWriter::emitInitializers(Module &M, GlobalVariable& V, unsigned BitOffse
     }
     // Function constants do not make sense
     case Type::FunctionTyID:
-        report_fatal_error("[llvm2alf] emitIntializers(): Unsupported constant of function type " + typeToString(*Ty));
+        alf_fatal_error("emitIntializers(): Unsupported constant of function type", *Ty);
         break;
     default:
-        report_fatal_error("[llvm2alf] emitIntializers(): Unsupported Type: " + typeToString(*Ty));
+        alf_fatal_error("emitIntializers(): Unsupported Type", *Ty);
         break;
     }
     assert(0 && "llvm_unreachable");
 }
 
 template<typename Tc>
-void ALFWriter::emitCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Tc* Const) {
+void ALFTranslator::emitCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Tc* Const) {
 
    	unsigned bitIndex = BitOffset;
     for(ConstantArray::const_op_iterator I = Const->op_begin(), E = Const->op_end();
@@ -169,7 +347,7 @@ void ALFWriter::emitCompositeInitializers(Module &M, GlobalVariable& V, unsigned
     }
 }
 
-void ALFWriter::emitStructInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantStruct* Const) {
+void ALFTranslator::emitStructInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantStruct* Const) {
 
 	const StructLayout* Layout = TD->getStructLayout(Const->getType());
     for(unsigned Ix = 0; Ix < Const->getNumOperands(); ++Ix) {
@@ -177,9 +355,9 @@ void ALFWriter::emitStructInitializers(Module &M, GlobalVariable& V, unsigned Bi
     }
 }
 
-void ALFWriter::emitInitializer(GlobalVariable& V, unsigned BitOffset, Constant* Const) {
+void ALFTranslator::emitInitializer(GlobalVariable& V, unsigned BitOffset, Constant* Const) {
 
-	ALF_DEBUG(dbgs() << "emitInitializer: " << valueToString(V) << "[offset=" << utostr(BitOffset)
+	DEBUG(dbgs() << "emitInitializer: " << valueToString(V) << "[offset=" << utostr(BitOffset)
 			         << "] <- " << valueToString(*Const) << "\n");
 
 	// no need to emit undefined initializers (e.g., padding generated by clang)
@@ -190,7 +368,7 @@ void ALFWriter::emitInitializer(GlobalVariable& V, unsigned BitOffset, Constant*
 	Output.startList("init");
 
 	Output.ref(ref, BitOffset);
-    emitConstant(Const);
+    (void/*FIXME*/)buildConstant(Const);
 
     // There is no notion of a volatile *variable* in LLVM
     if(ReadOnly) Output.atom("read_only");
@@ -198,13 +376,13 @@ void ALFWriter::emitInitializer(GlobalVariable& V, unsigned BitOffset, Constant*
     Output.endList("init");
 }
 
-void ALFWriter::emitConstant(Constant *CPV) {
+SExpr* ALFTranslator::buildConstant(Constant *CPV) {
 
 	if (isa<GlobalValue>(CPV)) {
-		emitGlobalValue(cast<GlobalValue>(CPV), 0ULL);
+		return buildGlobalValue(cast<GlobalValue>(CPV), 0ULL);
 
 	} else if (const ConstantExpr *CE = dyn_cast<ConstantExpr>(CPV)) {
-		emitConstantExpression(CE);
+		return buildConstantExpression(CE);
 
 	} else if (isa<UndefValue>(CPV) && CPV->getType()->isSingleValueType()) {
 		Output.undefined(getBitWidth(CPV->getType()));
@@ -229,96 +407,59 @@ void ALFWriter::emitConstant(Constant *CPV) {
 	    BasicBlock *BB = CBA->getBasicBlock();
 	    Output.labelRef(getBasicBlockLabel(BB), 0);
 	} else if(ConstantAggregateZero *CAZ = dyn_cast<ConstantAggregateZero>(CPV)) {
-		report_fatal_error("[llvm2alf] emitConstant(): unsupported ConstantAggregateZero. "
-				           "Type: " + typeToString(*CAZ->getType()));
+		alf_fatal_error("emitConstant(): unsupported ConstantAggregateZero", *CAZ->getType());
 	} else if(ConstantArray *CA = dyn_cast<ConstantArray>(CPV)) {
-		report_fatal_error("[llvm2alf] emitConstant(): unsupported ConstantArray. "
-				           "Type: " + typeToString(*CA->getType()));
+	    alf_fatal_error("emitConstant(): unsupported ConstantArray",*CA->getType());
 	} else if(ConstantStruct *CS = dyn_cast<ConstantStruct>(CPV)) {
-		report_fatal_error("[llvm2alf] emitConstant(): unsupported ConstantStruct. "
-				            "Type: " + typeToString(*CS->getType()));
+	    alf_fatal_error("emitConstant(): unsupported ConstantStruct",*CS->getType());
 	} else if(ConstantVector *CV = dyn_cast<ConstantVector>(CPV)) {
-		report_fatal_error("[llvm2alf] emitConstant(): unsupported ConstantVector. "
-				            "Type: " + typeToString(*CV->getType()));
+	    alf_fatal_error("emitConstant(): unsupported ConstantVector",*CV->getType());
 	} else {
-		report_fatal_error("[llvm2alf] unknown constant expressions of type: " + typeToString(*CPV->getType()));
+	    alf_fatal_error("emitConstant(): Unknown constant expressions",*CPV->getType());
 	}
+    return (AF->null()/*FIXME*/);
 }
 
-void ALFWriter::emitGlobalValue(const GlobalValue *GV, uint64_t Offset) {
+SExpr* ALFTranslator::buildGlobalValue(const GlobalValue *GV, uint64_t Offset) {
 
-	ALF_DEBUG(dbgs() << "[llvm2alf] Global Value Constant (label or address): " << valueToString(*GV) << "\n");
+	DEBUG(dbgs() << "[llvm2alf] Global Value Constant (label or address): " << valueToString(*GV) << "\n");
 
 	if(const GlobalVariable *GVar = dyn_cast<GlobalVariable>(GV)) {
 		Output.address(getValueName(GVar), Offset);
 	} else if(const Function *FVar = dyn_cast<Function>(GV)) {
 		Output.labelRef(getValueName(FVar), Offset);
 	} else {
-		report_fatal_error("[llvm2alf] emitGlobalValue: Unsupported Global Value Type: " + valueToString(*GV));
+		alf_fatal_error("emitGlobalValue: Unsupported Global Value Type: " + valueToString(*GV));
 	}
+	return (AF->null()/*FIXME*/);
 }
 
-// emit function signature {func LABEL ARG_DECLS SCOPE}
-void ALFWriter::emitFunctionSignature(const Function *F) {
-  // XXX: Ignoring calling conventions and linkage
-
-  // Loop over the arguments, printing them...
-  const FunctionType *FT = cast<FunctionType>(F->getFunctionType());
-  const AttrListPtr &PAL = F->getAttributes();
-
-  // Emit name
-  Output.labelRef(getValueName(F), 0);
-
-  // Emit formal parameters
-  Output.startList("arg_decls");
-  if (!F->arg_empty()) {
-      Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end();
-      unsigned Idx = 1;
-
-      std::string ArgName;
-      for (; I != E; ++I) {
-          std::string ArgName = getValueName(I);
-          Type *ArgTy = I->getType();
-          if (PAL.paramHasAttr(Idx, Attribute::ByVal)) {
-              errs() << "[llvm2alf] Warning: ByVal parameter does not conform to C interface" << typeToString(*FT) << "\n";
-          }
-          unsigned size = getBitWidth(ArgTy); // in bits
-          Output.alloc(ArgName, size);
-          ++Idx;
-      }
-  }
-  Output.endList("arg_decls");
-  if (FT->isVarArg()) {
-    report_fatal_error("[llvm2alf] emitFunctionSignature(): varargs are not supported");
-  }
-}
 
 //===----------------------------------------------------------------------===//
 //                        ALF Statement visitors
 //===----------------------------------------------------------------------===//
 
-void ALFWriter::visitReturnInst(ReturnInst &I) {
+void ALFTranslator::visitReturnInst(ReturnInst &I) {
 
   // TODO: struct return
   bool isStructReturn = I.getParent()->getParent()->hasStructRetAttr();
   if (isStructReturn) {
       alf_fatal_error("struct return not yet supported", I);
   }
-
-  Output.startStmt("return");
+  SExprList* Ret = AF->ret();
   for (unsigned i = 0, e = I.getNumOperands(); i != e; ++i) {
-      emitOperand(I.getOperand(i));
+      Ret->append(buildOperand(I.getOperand(i)));
   }
-  Output.endStmt("return");
+  addStatement(I,CurrentStatementIndex,Ret);
 }
 
-void ALFWriter::visitSwitchInst(SwitchInst &SI) {
+void ALFTranslator::visitSwitchInst(SwitchInst &SI) {
 
 	  if(SI.getNumCases() > 0) { /* not just the default case */
 		  Value* Condition = SI.getCondition();
 
 		  /* one case: true -> 0, default -> 1 */
-	 	  ALFWriter::CaseVector Cases;
+	 	  ALFTranslator::CaseVector Cases;
 	 	  for(SwitchInst::CaseIt I = SI.case_begin(), E = SI.case_end(); I != E; ++I) {
 	 	      Cases.push_back(make_pair(I.getCaseValue(), I.getCaseSuccessor()));
 	 	  }
@@ -331,13 +472,13 @@ void ALFWriter::visitSwitchInst(SwitchInst &SI) {
 }
 
 // Emit ALF code for a Branch Instruction
-void ALFWriter::visitBranchInst(BranchInst &I) {
+void ALFTranslator::visitBranchInst(BranchInst &I) {
 
   if (I.isConditional()) {
 	Value* Condition = I.getCondition();
 
 	/* one case: true -> 0, default -> 1 */
-	ALFWriter::CaseVector Cases;
+	ALFTranslator::CaseVector Cases;
 	Cases.push_back(make_pair(ConstantInt::getTrue(Condition->getType()), I.getSuccessor(0)));
 	emitSwitch(I, Condition, Cases, I.getSuccessor(1));
 
@@ -346,72 +487,52 @@ void ALFWriter::visitBranchInst(BranchInst &I) {
   }
 }
 
-void ALFWriter::visitIndirectBrInst(IndirectBrInst &IBI) {
+void ALFTranslator::visitIndirectBrInst(IndirectBrInst &IBI) {
     alf_fatal_error("indirect branch instruction not yet supported", IBI);
 }
 
 // The unreachable instructions has undefined behavior; its intention
 // will often be that of assert(0). As ALF is missing asserts, we
 // currently emit a nop (which is NOT a good solution IMHO).
-void ALFWriter::visitUnreachableInst(UnreachableInst &I) {
+void ALFTranslator::visitUnreachableInst(UnreachableInst &I) {
     Output.null();
 }
 
 
-void ALFWriter::visitStoreInst(StoreInst &I) {
+void ALFTranslator::visitStoreInst(StoreInst &I) {
+    // In general, it is not safe to ignore volatile stores. A store to a regular
+    // variable might be marked volatile (to avoid reordering).
+    // Therefore we do not consider (I.isVolatile()) to be special
 
-  if(I.isVolatile() && ! IgnoreVolatiles) {
-	  // In general, it is not safe to ignore volatile stores. A store to a regular
-	  // variable might be marked volatile (to avoid reordering).
-  }
-
-  // Emit LHS
-  Output.startStmt("store");
-  emitOperand(I.getPointerOperand());
-
-  Output.atom("with");
-  emitOperand(I.getOperand(0));
-  Output.endStmt("store");
+    // Emit LHS
+    SExpr *LHS = buildOperand(I.getPointerOperand());
+    SExpr *RHS = buildOperand(I.getOperand(0));
+    BuiltExpr = AF->store(LHS,RHS);
 }
 
 
-void ALFWriter::visitCallInst(CallInst &I) {
+void ALFTranslator::visitCallInst(CallInst &I) {
   if (isa<InlineAsm>(I.getCalledValue()))
     return visitInlineAsm(I);
-
-  bool WroteCallee = false;
 
   // Handle intrinsic function calls first...
   if (Function *F = I.getCalledFunction())
     if (Intrinsic::ID ID = (Intrinsic::ID)F->getIntrinsicID())
-      if (visitBuiltinCall(I, ID, WroteCallee))
+      if (visitBuiltinCall(I, ID))
         return;
 
-  Value *Callee = I.getCalledValue();
-
-  const PointerType  *PTy   = cast<PointerType>(Callee->getType());
-  const FunctionType *FTy   = cast<FunctionType>(PTy->getElementType());
-
-  // If this is a call to a struct-return function, assign to the first
-  // parameter instead of passing it to the call.
-  //bool hasByVal = I.hasByValArgument();
-  bool isStructRet = I.hasStructRetAttr();
 
   // FIXME: struct returns are not supported yet
-  if (isStructRet) {
+  if (I.hasStructRetAttr()) {
       alf_fatal_error("struct return is not supported yet",I);
   }
 
-  // if (I.isTailCall()) Out << " /*tail*/ ";
+  Value *Callee = I.getCalledValue();
+  const PointerType  *PTy   = cast<PointerType>(Callee->getType());
+  const FunctionType *FTy   = cast<FunctionType>(PTy->getElementType());
 
-  Output.startStmt("call");
-
-  if (!WroteCallee) {
-    // cf C Backend: Inserts a cast if:
-    //  - this is an indirect call to a struct return function
-    //  - indirect calls with byval arguments.
-    emitOperand(Callee);
-  }
+  SExprList *Call = AF->list("call");
+  Call->append(buildOperand(Callee));
 
   // FIXME: VarArgs are not supported yet
   if(FTy->isVarArg() && !FTy->getNumParams()) {
@@ -422,40 +543,31 @@ void ALFWriter::visitCallInst(CallInst &I) {
   CallSite CS(&I);
   CallSite::arg_iterator AI = CS.arg_begin(), AE = CS.arg_end();
   unsigned ArgNo = 0;
-  if (isStructRet) {   // Skip struct return argument.
-    ++AI;
-    ++ArgNo;
-  }
-
 
   for (; AI != AE; ++AI, ++ArgNo) {
-    if (ArgNo < NumDeclaredParams &&
-        (*AI)->getType() != FTy->getParamType(ArgNo)) {
-      errs() << "[llvm2alf] Mismatch in Parameter " << ArgNo << "\n";
+    // Check whether types match (no implicit coercion)
+    if (ArgNo < NumDeclaredParams && (*AI)->getType() != FTy->getParamType(ArgNo)) {
+      alf_warning("Mismatch in Parameter " + utostr(ArgNo));
       alf_fatal_error("coercion of function parameters is not supported", I);
     }
     // Check if the argument is expected to be passed by value.
     if (I.paramHasAttr(ArgNo+1, Attribute::ByVal)) {
         // This has no direct consequence for ALF code generation, but may lead
         // to problems when a caller uses the C interface
-        errs() << "[llvm2alf] Warning: Pointer argument was declared as ByVal parameter of "
-                  "type " << typeToString(*(*AI)->getType()) << "\n";
+        alf_warning("Pointer argument was declared as ByVal parameter of "
+                    "type " + typeToString(*(*AI)->getType()));
     }
-    emitOperand(*AI);
+    Call->append(buildOperand(*AI));
   }
-
-  Output.atom("result");
-
+  Call->append("result");
   if(! FTy->getReturnType()->isVoidTy()) {
-    Output.address(getValueName(&I), 0);
+    Call->append(AF->address(getValueName(&I), 0));
   }
-
-  Output.endStmt("call");
+  BuiltExpr = Call;
 }
 
 /// visitBuiltinCall - Handle the call to the specified builtin.  Returns true
-/// if the entire call is handled, return false if it wasn't handled, and
-/// optionally set 'WroteCallee' if the callee has already been printed out.
+/// if the entire call is handled, return false if it wasn't handled.
 /// TODO: va_* vararg support
 // XXX: Unresolved question: what is the best way to deal with mem{cpy,set,move} ???
 //      This applies to all intrinsics which are usually either replaced by an optimized code block or
@@ -468,9 +580,8 @@ void ALFWriter::visitCallInst(CallInst &I) {
 //  ... floating points: nan,nanf,inf,inff
 //  ... stack save, stack restore builtins
 //  ... support for 128-bit integers
-bool ALFWriter::visitBuiltinCall(CallInst &I, Intrinsic::ID ID,
-                               bool &WroteCallee) {
-
+bool ALFTranslator::visitBuiltinCall(CallInst &I, Intrinsic::ID ID) {
+    SExpr *Expr;
   switch(ID) {
   case Intrinsic::dbg_declare:
   case Intrinsic::dbg_value:
@@ -491,7 +602,7 @@ bool ALFWriter::visitBuiltinCall(CallInst &I, Intrinsic::ID ID,
 		  for(uint64_t I = 0, E = Len->getLimitedValue(); I!=E; ++I) {
 			  Output.startList("add",true);
 			  Output.atom(TD->getTypeSizeInBits(Dst->getType()));
-			  emitExpression(Dst);
+			  Expr = buildExpression(Dst);
 			  Output.dec_unsigned(TD->getTypeSizeInBits(Dst->getType()), bitsToLAU(I*8));
 			  Output.dec_unsigned(1,0);
 			  Output.endList("add");
@@ -499,13 +610,13 @@ bool ALFWriter::visitBuiltinCall(CallInst &I, Intrinsic::ID ID,
 		  Output.atom("with");
 		  for(uint64_t I = 0, E = Len->getLimitedValue(); I!=E; ++I) {
 			  if(ID == Intrinsic::memset) {
-				  emitExpression(Src);
+			      Expr = buildExpression(Src);
 			  } else {
 				  Output.startList("load",true);
 				  Output.atom(8);
 				  Output.startList("add",true);
 				  Output.atom(TD->getTypeSizeInBits(Src->getType()));
-				  emitExpression(Src);
+				  Expr = buildExpression(Src);
 				  Output.dec_unsigned(TD->getTypeSizeInBits(Src->getType()), bitsToLAU(I*8));
 				  Output.dec_unsigned(1,0);
 				  Output.endList("add");
@@ -525,7 +636,7 @@ bool ALFWriter::visitBuiltinCall(CallInst &I, Intrinsic::ID ID,
 }
 
 
-void ALFWriter::visitInlineAsm(CallInst &CI) {
+void ALFTranslator::visitInlineAsm(CallInst &CI) {
     alf_fatal_error("Inline assembler not supported yet",CI);
 }
 
@@ -533,49 +644,44 @@ void ALFWriter::visitInlineAsm(CallInst &CI) {
 //                        ALF Expression visitors
 //===----------------------------------------------------------------------===//
 
-void ALFWriter::visitSelectInst(SelectInst &I) {
+void ALFTranslator::visitSelectInst(SelectInst &I) {
 #ifdef ENABLE_SELECT_EXPRESSIONS
-  Output.startList("if");
-  Output.atom(getBitWidth(I.getTrueValue()->getType()));
-  emitOperand(I.getCondition());
-  emitOperand(I.getTrueValue());
-  emitOperand(I.getFalseValue());
-  Output.endList("if");
+  BuiltExpr = AF->list("if")
+          ->append(AF->atom(getBitWidth(I.getTrueValue()->getType())))
+          ->append(buildOperand(I.getCondition()))
+          ->append(buildOperand(I.getTrueValue()))
+          ->append(buildOperand(I.getFalseValue()));
 #else
-  std::string InstLabel = getInstructionLabel(I.getParent(), CurrentStatementIndex);
-  std::string ThenLabel = InstLabel + "::then";
-  std::string ElseLabel = InstLabel + "::else";
-  std::string JoinLabel = InstLabel + "::join";
+  Twine InstLabel = getInstructionLabel(I.getParent(), CurrentStatementIndex);
+  Twine ThenLabel = InstLabel + "::then";
+  Twine ElseLabel = InstLabel + "::else";
+  Twine JoinLabel = InstLabel + "::join";
 
-  Output.startStmt("switch");
-  emitOperand(I.getCondition());
-  Output.startList("target");
-  emitOperand(ConstantInt::getTrue(I.getCondition()->getType()));
-  Output.labelRef(ThenLabel, 0);
-  Output.endList("target");
-  Output.startList("default");
-  Output.labelRef(ElseLabel, 0);
-  Output.endList("default");
-  Output.endStmt("switch");
+  SExprList *Switch = AF->list("switch");
+  SExpr *Cond = buildOperand(I.getCondition());
+  SExpr *TrueVal = buildOperand(ConstantInt::getTrue(I.getCondition()->getType()));
+  SExpr *ThenTarget = AF->list("target")->append(TrueVal)->append(AF->labelRef(ThenLabel));
+  SExpr *ElseTarget = AF->list("default")->append(AF->labelRef(ElseLabel));
+  Switch->append(Cond)
+        ->append(ThenTarget)
+        ->append(ElseTarget);
+  addStatement(I,CurrentStatementIndex,Switch);
 
   // then and else branch
   for(int Branch = 0; Branch < 2; Branch++) {
-	  Output.setStmtLabel((Branch == 0) ? ThenLabel : ElseLabel);
-	  Output.startStmt("store");
-	  Output.address(getValueName(&I));
-	  Output.atom("with");
-	  emitOperand((Branch == 0) ? I.getTrueValue() : I.getFalseValue());
-	  Output.endStmt("store");
-	  Output.jump(JoinLabel);
+      // store true/false value
+      Twine& Label = Branch == 0 ? ThenLabel : ElseLabel;
+      SExpr *Val = buildOperand((Branch == 0) ? I.getTrueValue() : I.getFalseValue());
+      SExpr *Store = AF->store(AF->address(getValueName(&I)),Val);
+      CurrentBlock->addStatement(Label, "", Store);
+      CurrentBlock->addStatement(Label + "::jump","", AF->jump(JoinLabel));
   }
   // join
-  Output.setStmtLabel(JoinLabel);
-  // nop to avoid double label errors
-  Output.null();
+  CurrentBlock->addStatement(JoinLabel, "join point for select branch", AF->null());
 #endif
 }
 
-void ALFWriter::visitAllocaInst(AllocaInst &AI) {
+void ALFTranslator::visitAllocaInst(AllocaInst &AI) {
 
     if (isStaticSizeAlloca(&AI) != 0) {
     	Output.address(getValueName(&AI), 0);
@@ -596,7 +702,7 @@ void ALFWriter::visitAllocaInst(AllocaInst &AI) {
 }
 
 // The value for PHI nodes is set at the predecessor
-void ALFWriter::visitPHINode(PHINode &I) {
+void ALFTranslator::visitPHINode(PHINode &I) {
   Output.load(getBitWidth(I.getType()), getValueName(&I), 0);
 }
 
@@ -604,7 +710,7 @@ void ALFWriter::visitPHINode(PHINode &I) {
 // FIXME: Support nuw and nsw Semantics
 // FIXME: Is it ok to use u_mul + bitcast to emulate LLVM mul?
 // FIXME: has ALF/mod and LLVM/rem the same semantics?
-void ALFWriter::visitBinaryOperator(Instruction &I) {
+void ALFTranslator::visitBinaryOperator(Instruction &I) {
   // binary instructions, shift instructions, setCond instructions.
   assert(!I.getType()->isPointerTy());
 
@@ -614,7 +720,7 @@ void ALFWriter::visitBinaryOperator(Instruction &I) {
       Value* Operand = BinaryOperator::getNegArgument(cast<BinaryOperator>(&I));
       Output.startList("neg",true);
       Output.atom(getBitWidth(Operand->getType()));
-      emitOperand(Operand);
+      /*emitOperand()*/(void)buildOperand(Operand);
       Output.endList("neg");
 
   } else if (BinaryOperator::isFNeg(&I)) {
@@ -623,7 +729,7 @@ void ALFWriter::visitBinaryOperator(Instruction &I) {
       Output.startList("f_neg",true);
       Output.atom(getExpWidth(FTy));
       Output.atom(getFracWidth(FTy));
-      emitOperand(Operand);
+      /*emitOperand()*/(void)buildOperand(Operand);
       Output.endList("f_neg");
 
   } else {
@@ -657,7 +763,7 @@ void ALFWriter::visitBinaryOperator(Instruction &I) {
     case Instruction::FDiv: Cmd = "f_div"; BinOpType = FpOp; break;
     case Instruction::FRem:
         // TODO: support frem
-        errs() << "[llvm2alf]: frem is not yet supported\n";
+        alf_warning("frem is not yet supported, emitting undefined");
         Output.undefined(getBitWidth(I.getType()));
         return;
     default:
@@ -682,8 +788,8 @@ void ALFWriter::visitBinaryOperator(Instruction &I) {
         }
         Output.startList(Cmd);
         Output.atom(BitWidth);
-        emitOperand(Ops[0]);
-        emitOperand(Ops[1]);
+        /*emitOperand()*/(void)buildOperand(Ops[0]);
+        /*emitOperand()*/(void)buildOperand(Ops[1]);
         Output.dec_unsigned(1,I.getOpcode() == Instruction::Add ? 0 : 1);
         Output.endList(Cmd);
         return;
@@ -694,28 +800,28 @@ void ALFWriter::visitBinaryOperator(Instruction &I) {
         Output.startList(Cmd);
         Output.atom(BitWidth);
         Output.atom(BitWidth);
-        emitOperand(I.getOperand(0));
-        emitOperand(I.getOperand(1));
+        /*emitOperand()*/(void)buildOperand(I.getOperand(0));
+        /*emitOperand()*/(void)buildOperand(I.getOperand(1));
         Output.endList(Cmd);
     } else if(BinOpType == Logic) {
         Output.startList(Cmd);
         Output.atom(BitWidth);
-        emitOperand(I.getOperand(0));
-        emitOperand(I.getOperand(1));
+        /*emitOperand()*/(void)buildOperand(I.getOperand(0));
+        /*emitOperand()*/(void)buildOperand(I.getOperand(1));
         Output.endList(Cmd);
     } else if(BinOpType == Shift) {
         Output.startList(Cmd);
         Output.atom(BitWidth);
         Output.atom(BitWidth);
-        emitOperand(I.getOperand(0));
-        emitOperand(I.getOperand(1));
+        /*emitOperand()*/(void)buildOperand(I.getOperand(0));
+        /*emitOperand()*/(void)buildOperand(I.getOperand(1));
         Output.endList(Cmd);
     } else if(BinOpType == FpOp) {
       Output.startList(Cmd);
       Output.atom(getExpWidth(OpTy));
       Output.atom(getFracWidth(OpTy));
-      emitOperand(I.getOperand(0));
-      emitOperand(I.getOperand(1));
+      /*emitOperand()*/(void)buildOperand(I.getOperand(0));
+      /*emitOperand()*/(void)buildOperand(I.getOperand(1));
       Output.endList(Cmd);
     }
     return;
@@ -725,7 +831,7 @@ void ALFWriter::visitBinaryOperator(Instruction &I) {
 
 /// emit cmp expression
 //  Note that (in constrast to C Backend) we do not need signedness casts
-void ALFWriter::visitICmpInst(ICmpInst &I) {
+void ALFTranslator::visitICmpInst(ICmpInst &I) {
   string Cmd;
   unsigned BitWidth = getBitWidth(I.getOperand(0)->getType());
   assert(BitWidth == getBitWidth(I.getOperand(1)->getType()) && "ICmp: Bitwidth does not match");
@@ -745,8 +851,8 @@ void ALFWriter::visitICmpInst(ICmpInst &I) {
   }
   Output.startList(Cmd);
   Output.atom(BitWidth);
-  emitOperand(I.getOperand(0));
-  emitOperand(I.getOperand(1));
+  /*emitOperand()*/(void)buildOperand(I.getOperand(0));
+  /*emitOperand()*/(void)buildOperand(I.getOperand(1));
   Output.endList(Cmd);
 }
 
@@ -762,7 +868,7 @@ void ALFWriter::visitICmpInst(ICmpInst &I) {
 // FCMP_U<=>: LLVM: UNO(x,y) || x <=> y
 //            ALF:  If any is undefined: undefined
 //                  otherwise: x <=> y
-void ALFWriter::visitFCmpInst(FCmpInst &I) {
+void ALFTranslator::visitFCmpInst(FCmpInst &I) {
 
 
   Type* OpTy = I.getOperand(0)->getType();
@@ -803,15 +909,15 @@ void ALFWriter::visitFCmpInst(FCmpInst &I) {
   Output.startList(Cmd);
   Output.atom(getExpWidth(OpTy));
   Output.atom(getFracWidth(OpTy));
-  emitOperand(I.getOperand(0));
-  emitOperand(I.getOperand(1));
+  /*emitOperand()*/(void)buildOperand(I.getOperand(0));
+  /*emitOperand()*/(void)buildOperand(I.getOperand(1));
   Output.endList(Cmd);
 }
 
 
 
 // GEP Instructions ~ address arithmetic
-void ALFWriter::visitGetElementPtrInst(GetElementPtrInst &GepIns) {
+void ALFTranslator::visitGetElementPtrInst(GetElementPtrInst &GepIns) {
 
 	Value *Ptr = GepIns.getPointerOperand();
 	gep_type_iterator S = gep_type_begin(GepIns), E = gep_type_end(GepIns);
@@ -837,7 +943,7 @@ void ALFWriter::visitGetElementPtrInst(GetElementPtrInst &GepIns) {
 /// are defined in ALF.
 ///
 /// FIXME: alignment issues are ignored for now
-void ALFWriter::visitLoadInst(LoadInst &I) {
+void ALFTranslator::visitLoadInst(LoadInst &I) {
 
   if(I.isVolatile() && ! IgnoreVolatiles) {
     Output.load(getBitWidth(I.getType()),getVolatileStorage(I.getType()),0);
@@ -846,11 +952,11 @@ void ALFWriter::visitLoadInst(LoadInst &I) {
 
   Output.startList("load");
   Output.atom(getBitWidth(I.getType()));
-  emitOperand(I.getOperand(0));
+  /*emitOperand()*/(void)buildOperand(I.getOperand(0));
   Output.endList("load");
 }
 
-void ALFWriter::visitExtractElementInst(ExtractElementInst &I) {
+void ALFTranslator::visitExtractElementInst(ExtractElementInst &I) {
   alf_fatal_error("unsupported: visitExtractElementInst", I);
   // We know that our operand is not inlined.
 //  Out << "((";
@@ -858,12 +964,12 @@ void ALFWriter::visitExtractElementInst(ExtractElementInst &I) {
 //    cast<VectorType>(I.getOperand(0)->getType())->getElementType();
 //  printType(Out, PointerType::getUnqual(EltTy));
 //  Out << ")(&" << getValueName(I.getOperand(0)) << "))[";
-//  emitOperand(I.getOperand(1));
+//  /*emitOperand()*/(void)buildOperand(I.getOperand(1));
 //  Out << "]";
 }
 
 
-void ALFWriter::visitInsertElementInst(InsertElementInst &I) {
+void ALFTranslator::visitInsertElementInst(InsertElementInst &I) {
   alf_fatal_error("unsupported: visitInsertElementInst", I);
 //  const Type *EltTy = I.getType()->getElementType();
 //  emitOperand(I.getOperand(0));
@@ -877,7 +983,7 @@ void ALFWriter::visitInsertElementInst(InsertElementInst &I) {
 //  Out << ")";
 }
 
-void ALFWriter::visitExtractValueInst(ExtractValueInst &EVI) {
+void ALFTranslator::visitExtractValueInst(ExtractValueInst &EVI) {
 
     uint64_t BitOffset = 0;
     {
@@ -893,14 +999,14 @@ void ALFWriter::visitExtractValueInst(ExtractValueInst &EVI) {
     Output.atom(getBitWidth(EVI.getAggregateOperand()->getType()));
     Output.atom(BitOffset);
     Output.atom(BitOffset + getBitWidth(EVI.getType()) - 1);
-    emitOperand(EVI.getAggregateOperand());
+    /*emitOperand()*/(void)buildOperand(EVI.getAggregateOperand());
     Output.endList("select");
 }
 
 
-void ALFWriter::visitInsertValueInst(InsertValueInst &IVI) {
+void ALFTranslator::visitInsertValueInst(InsertValueInst &IVI) {
 
-    errs() << "unsupported: visitInsertValueInst\n";
+    alf_warning("Unsupported instruction (emitting undefined): visitInsertValueInst");
     Output.undefined(getBitWidth(IVI.getType()));
   // Start by copying the entire aggregate value into the result variable.
 //  emitOperand(IVI.getOperand(0));
@@ -921,7 +1027,7 @@ void ALFWriter::visitInsertValueInst(InsertValueInst &IVI) {
 //  emitOperand(IVI.getOperand(1));
 }
 
-void ALFWriter::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
+void ALFTranslator::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
     alf_fatal_error("unsupported: visitShuffleVectorInst", SVI);
 //  Out << "(";
 //  printType(Out, SVI.getType());
@@ -955,7 +1061,7 @@ void ALFWriter::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
 //  Out << "}";
 }
 
-void ALFWriter::visitCastInst(CastInst &I) {
+void ALFTranslator::visitCastInst(CastInst &I) {
 
   Value* Operand = I.getOperand(0);
 
@@ -987,12 +1093,12 @@ void ALFWriter::visitCastInst(CastInst &I) {
 
   // Pointers (which might be symbolic memory addresses) cannot be coerced to integers in ALF
   case Instruction::PtrToInt:
-	  errs() << "LLVM->ALF: unsupported ptr2int ins, emitting undefined\n";
+      alf_warning("Unsupported PtrToInt instruction (emitting undefined)");
 	  Output.comment("undefined ptr2int");
 	  Output.undefined(getBitWidth(DstTy));
 	  break;
   case Instruction::IntToPtr:
-	  errs() << "LLVM->ALF: unsupported int2ptr ins, emitting undefined\n";
+      alf_warning("Unsupported IntToPtr instruction (emitting undefined)");
 	  Output.comment("undefined int2ptr");
 	  Output.undefined(getBitWidth(DstTy));
 	  break;
@@ -1007,13 +1113,13 @@ void ALFWriter::visitCastInst(CastInst &I) {
 	  break;
   case Instruction::BitCast:
 	if(SrcTy == DstTy) {
-		emitOperand(Operand);
+		/*emitOperand()*/(void)buildOperand(Operand);
 	} else if(isPtrPtrBitCast(I)){
 		/* ignore pointer <-> pointer bitcasts */
-		ALF_DEBUG(dbgs() << "Warning: LLVM->ALF: Ignoring ptr2ptr BitCast\n");
+		DEBUG(dbgs() << "Warning: LLVM->ALF: Ignoring ptr2ptr BitCast\n");
 		assert(TD->getTypeAllocSizeInBits(I.getType()) ==
 			   TD->getTypeAllocSizeInBits(Operand->getType()) && "bitcast between type of different size");
-		emitOperand(Operand);
+		/*emitOperand()*/(void)buildOperand(Operand);
 	} else {
 	    alf_fatal_error("unsupported BitCast instruction", I);
 	}
@@ -1022,66 +1128,34 @@ void ALFWriter::visitCastInst(CastInst &I) {
 
   }
 }
-/// Store the value of the instruction in a temporary
-/// ALF variable. Directly *after* the store, the value
-/// of emitLoad(I) is equivalent to emitExpression(I)
-void ALFWriter::emitTemporaryStore(Instruction* I) {
-    Output.startStmt("store");
-    Output.address(getValueName(I), 0);
-    Output.atom("with");
-    emitExpression(I);
-    Output.endStmt("store");
-}
 
 
-
-/// Note: Emit Operand will use use a local variable if the value
-/// is neither inlineable nor a constant
-/// cf. C Backend: has a Static parameter, which we removed
-void ALFWriter::emitExpression(Value *Operand) {
-
-    Instruction *I;
-    Constant* CPV;
-
-    if((I = dyn_cast<Instruction>(Operand)) != 0) {
-        visit(I);
-    } else if((CPV = dyn_cast<Constant>(Operand)) != 0) {
-        emitConstant(CPV);
-    } else {
-    	report_fatal_error("emitExpression(): Neither Constant nor Instruction: " + valueToString(*Operand));
-    }
-}
-/// emitOperand detects whether the operand should be inlined or
+/// BuildOperand detects whether the operand should be inlined or
 /// not. If yes, the expression is emitted, otherwise a load of
 /// the corresponding local variable is emited.
-//
-// ct. CBackend: the Static parameter was removed
-void ALFWriter::emitOperand(Value *Operand) {
+SExpr* ALFTranslator::buildOperand(Value *Operand) {
 
-	Constant* CPV = dyn_cast<Constant>(Operand);
-    if (CPV) {
-    	emitExpression(Operand);
-    	return;
+    if (Constant *CPV = dyn_cast<Constant>(Operand)) {
+    	return buildExpression(CPV);
     }
     Instruction *I = dyn_cast<Instruction>(Operand);
     if(I && isInlinableInst(*I)) {
-    	emitExpression(Operand);
-        return;
+        return buildExpression(Operand);
     }
     // Load the named operand
-    emitLoad(Operand);
+    return buildLoad(Operand);
 }
 
 
 
 // Load the variable the given operand was
 // assigned to.
-void ALFWriter::emitLoad(Value* Operand) {
-    unsigned size = getBitWidth(Operand->getType());
-    Output.load(size, getValueName(Operand));
+// FIXME: inline
+SExpr* ALFTranslator::buildLoad(Value* Operand) {
+    return AF->load(getBitWidth(Operand->getType()),getValueName(Operand));
 }
 
-void ALFWriter::emitUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
+void ALFTranslator::emitUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
     setPHICopiesForSuccessor (Block, Succ);
     Output.jump(getBasicBlockLabel(Succ));
 }
@@ -1090,7 +1164,7 @@ void ALFWriter::emitUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
 
 // Emit switch statement. The phi variables are now set in an extra basic block inserted
 // between the predecessors and sucessor.
-void ALFWriter::emitSwitch(TerminatorInst& SI,
+void ALFTranslator::emitSwitch(TerminatorInst& SI,
 		                   Value* Condition,
 		                   const CaseVector& Cases,
 		                   BasicBlock* DefaultCase) {
@@ -1099,10 +1173,10 @@ void ALFWriter::emitSwitch(TerminatorInst& SI,
 
 	  std::set<BasicBlock*> EdgeBlocks;
 	  Output.startStmt("switch");
-	  emitOperand(Condition);
+	  /*emitOperand()*/(void)buildOperand(Condition);
 	  for(CaseVector::const_iterator I = Cases.begin(), E = Cases.end(); I!=E; ++I) {
 		    Output.startList("target");
-		    emitOperand(I->first);
+		    /*emitOperand()*/(void)buildOperand(I->first);
 		    if(isa<PHINode>(I->second->begin())) { /* need to set phi variables on the edge */
 				Output.labelRef(getConditionalJumpLabel(BB, I->second));
 				EdgeBlocks.insert(I->second);
@@ -1139,7 +1213,7 @@ void ALFWriter::emitSwitch(TerminatorInst& SI,
 //         be more efficient to user intermediate BBs though.
 // CAVEAT: The branch condition has to be saved to a temporary
 //         variable BEFORE the successors are set.
-void ALFWriter::setPHICopiesForSuccessor (BasicBlock *PredBlock, BasicBlock *Successor) {
+void ALFTranslator::setPHICopiesForSuccessor (BasicBlock *PredBlock, BasicBlock *Successor) {
   for (BasicBlock::iterator I = Successor->begin(); isa<PHINode>(I); ++I) {
     PHINode *PN = cast<PHINode>(I);
     Value *IV = PN->getIncomingValueForBlock(PredBlock);
@@ -1149,7 +1223,7 @@ void ALFWriter::setPHICopiesForSuccessor (BasicBlock *PredBlock, BasicBlock *Suc
 	  Output.startStmt("store");
       Output.address(getValueName(I), 0);
       Output.atom("with");
-      emitOperand(IV);
+      /*emitOperand()*/(void)buildOperand(IV);
       Output.endStmt("store");
     }
   }
@@ -1166,24 +1240,25 @@ void ALFWriter::setPHICopiesForSuccessor (BasicBlock *PredBlock, BasicBlock *Suc
 //  - ptr2ptr:    (global, k) -> (global, k)
 //  - ptr +- ptr: (g1,k1) -> (g1,k2) -> (g1, k1+-k2)
 //  - int`op`int: (_, i1) -> (_, i2) -> i1 `op` i2
-void ALFWriter::emitConstantExpression(const ConstantExpr* CE) {
+SExpr* ALFTranslator::buildConstantExpression(const ConstantExpr* CE) {
 
-	ALF_DEBUG(dbgs() << "[llvm2alf]: Emmitting constant expression: " << *CE << "\n");
+	DEBUG(dbgs() << "[llvm2alf]: Emmitting constant expression: " << *CE << "\n");
 
 	std::auto_ptr<ALFConstant> FoldedConstant = foldConstant(CE);
 
 	if(FoldedConstant.get() == 0) {
-		errs() << "Failed to fold constant expression, emiting undefined: " << valueToString(*CE) << "\n";
+	    alf_warning("Failed to fold constant expression, emiting undefined: " + valueToString(*CE));
 		Output.undefined(getBitWidth(CE->getType()));
 	} else {
 		FoldedConstant->print(Output);
 	}
+    return (AF->null()/*FIXME*/);
 }
 
 /// Do constant integer and pointer arithmetic.
 /// Be careful as pointer offsets are bit-addresses in ALF and byte-addresses in LLVM
 /// returns a freshly allocated ALFConstant (constant address, integer or float)
-std::auto_ptr<ALFConstant> ALFWriter::foldConstant(const Constant* Const) {
+std::auto_ptr<ALFConstant> ALFTranslator::foldConstant(const Constant* Const) {
 
 	const ConstantExpr* CE = dyn_cast<ConstantExpr>(Const);
 
@@ -1210,7 +1285,7 @@ std::auto_ptr<ALFConstant> ALFWriter::foldConstant(const Constant* Const) {
 		uint64_t AbsAddress = ConstAddress->getLimitedValue();
 		const PointerType* PtrTy = cast<PointerType>(Const->getType());
 		if(PtrTy->getElementType()->isFunctionTy() || PtrTy->getElementType()->isLabelTy()) {
-			errs() << "llvm2alf: foldConstant: absolute addresses of functions or labels are not supported\n";
+			alf_warning("foldConstant: absolute addresses of functions or labels are not supported");
 			return std::auto_ptr<ALFConstant>( 0 );
 		}
 		for(mem_areas_iterator I = mem_areas_begin(), E = mem_areas_end(); I!=E; ++I) {
@@ -1224,7 +1299,7 @@ std::auto_ptr<ALFConstant> ALFWriter::foldConstant(const Constant* Const) {
 			// no memory areas specified, use default catch-all
 			return std::auto_ptr<ALFConstant>( new ALFConstAddress(false, ABS_REF, AbsAddress * LeastAddrUnit) );
 		} else {
-			errs() << "llvm2alf: foldConstant: invalid absolute address (not specified on the command line): " << AbsAddress << "\n";
+			alf_warning("foldConstant: invalid absolute address (not specified on the command line): " + AbsAddress);
 			return std::auto_ptr<ALFConstant>( 0 );
 		}
 
@@ -1240,7 +1315,7 @@ std::auto_ptr<ALFConstant> ALFWriter::foldConstant(const Constant* Const) {
 			return Op;
 		/* unsupported */
 		default:
-			errs() << "Unsupported instruction in constant expression: " + valueToString(*CE) << "\n";
+			alf_warning("Unsupported instruction in constant expression: " + valueToString(*CE));
 			return std::auto_ptr<ALFConstant>( 0 );
 		}
 
@@ -1268,7 +1343,7 @@ std::auto_ptr<ALFConstant> ALFWriter::foldConstant(const Constant* Const) {
 	}
 }
 
-std::auto_ptr<ALFConstant> ALFWriter::foldBinaryConstantExpression(const ConstantExpr* CE) {
+std::auto_ptr<ALFConstant> ALFTranslator::foldBinaryConstantExpression(const ConstantExpr* CE) {
 
 	std::auto_ptr<ALFConstant> OpLeft = foldConstant(CE->getOperand(0));
 	std::auto_ptr<ALFConstant> OpRight = foldConstant(CE->getOperand(1));
@@ -1308,7 +1383,7 @@ std::auto_ptr<ALFConstant> ALFWriter::foldBinaryConstantExpression(const Constan
 				AddrLeft->addOffset(Offset.getLimitedValue());
 				return OpLeft;
 			} else {
-				report_fatal_error("llvm2alf: foldBinaryConstantExpression: In ptr + x, x has the wrong type: " +
+				alf_fatal_error("foldBinaryConstantExpression: In ptr + x, x has the wrong type: " +
 						valueToString(*CE->getOperand(1)));
 			}
 		} else if(ALFConstAddress* AddrRight = dyn_cast<ALFConstAddress>(OpRight.get())) {
@@ -1317,10 +1392,10 @@ std::auto_ptr<ALFConstant> ALFWriter::foldBinaryConstantExpression(const Constan
 				AddrRight->addOffset(IntegerLHS->getLimitedValue());
 				return OpRight;
 			} else if(CE->getOpcode() == Instruction::Sub) {
-				errs() << "llvm2alf: foldBinaryConstantExpression: scalar - pointer is undefined\n";
+				errs() << "[llvm2alf] Warning: foldBinaryConstantExpression: scalar - pointer is undefined\n";
 				return std::auto_ptr<ALFConstant> (0);
 			} else {
-				report_fatal_error("llvm2alf: foldBinaryConstantExpression: In x + ptr, x has the wrong type: " +
+				alf_fatal_error("foldBinaryConstantExpression: In x + ptr, x has the wrong type: " +
 						valueToString(*CE->getOperand(0)));
 			}
 		} else if(IntegerLHS && IntegerRHS) {
@@ -1371,7 +1446,7 @@ std::auto_ptr<ALFConstant> ALFWriter::foldBinaryConstantExpression(const Constan
 
 
 // Constant Pointers ~ compile-time address arithmetic
-uint64_t ALFWriter::getConstantPointerOffset(const ConstantExpr* CE) {
+uint64_t ALFTranslator::getConstantPointerOffset(const ConstantExpr* CE) {
 
 	assert(CE->getOpcode() == Instruction::GetElementPtr && "[llvm2alf]: getConstantPointerOffset(): Not a GEP expression");
 
@@ -1384,7 +1459,7 @@ uint64_t ALFWriter::getConstantPointerOffset(const ConstantExpr* CE) {
 		if(ConstantInt* EIx = dyn_cast<ConstantInt>(I.getOperand())) {
 			BitOffset += getBitOffset(cast<CompositeType>(*I),EIx->getLimitedValue());
 		} else {
-			report_fatal_error("[llvm2alf] getConstantPointerOffset: Non constant index for composite type "
+			alf_fatal_error("getConstantPointerOffset: Non constant index for composite type "
 			                   "in constant GEP expression: " + valueToString(*I.getOperand()));
 		}
 	}
@@ -1393,7 +1468,7 @@ uint64_t ALFWriter::getConstantPointerOffset(const ConstantExpr* CE) {
 }
 
 // Pointers and run-time address arithmetic
-void ALFWriter::emitPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, uint64_t> >& Offsets)
+void ALFTranslator::emitPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, uint64_t> >& Offsets)
 {
     // Pass 1: Fold constants
     int PtrBitWidth = getBitWidth(Ptr->getType());
@@ -1429,14 +1504,14 @@ void ALFWriter::emitPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, uint64
     }
 }
 
-void ALFWriter::emitPointer(Value *Operand, uint64_t Offset) {
+void ALFTranslator::emitPointer(Value *Operand, uint64_t Offset) {
     // Pass 1: Open add expressions
     // assert(Operand->getType()->isPointerTy() && "emitPointer: not a pointer type");
 
     // Emit Operand (First argument to innermost add, if any)
     Output.startList("add",false); // Add to address
     Output.atom(getBitWidth(Operand->getType()));
-    emitOperand(Operand);
+    /*emitOperand()*/(void)buildOperand(Operand);
     Output.offset(Offset);
     Output.dec_unsigned(1,0); // No carry bit
     Output.endList("add"); // Close add expression
@@ -1451,11 +1526,11 @@ void ALFWriter::emitPointer(Value *Operand, uint64_t Offset) {
 // TODO: is it ok to emulate LLVM multiplication this way?
 //
 // FIXME: support nsw flags etc.
-void ALFWriter::emitMultiplication(unsigned ResultBitWidth, Value* Op1, Value* Op2) {
+void ALFTranslator::emitMultiplication(unsigned ResultBitWidth, Value* Op1, Value* Op2) {
   unsigned BitWidth1 = getBitWidth(Op1->getType());
   unsigned BitWidth2 = getBitWidth(Op2->getType());
   if(BitWidth1+BitWidth2 < ResultBitWidth) {
-      report_fatal_error("[llvm2alf] emitMultiplication(): Invalid Size of operands");
+      alf_fatal_error("[llvm2alf] emitMultiplication(): Invalid Size of operands");
   }
   Output.startList("select");
   Output.atom(BitWidth1 + BitWidth2);
@@ -1464,27 +1539,27 @@ void ALFWriter::emitMultiplication(unsigned ResultBitWidth, Value* Op1, Value* O
   Output.startList("u_mul",true);
   Output.atom(BitWidth1);
   Output.atom(BitWidth2);
-  emitOperand(Op1);
-  emitOperand(Op2);
+  /*emitOperand()*/(void)buildOperand(Op1);
+  /*emitOperand()*/(void)buildOperand(Op2);
   Output.endList("u_mul");
   Output.endList("select");
 }
 
 /// emit a cast between integer types
-void  ALFWriter::emitIntCast(Value* Operand, unsigned BitWidthSrc, unsigned BitWidthDst, bool signExtend) {
+void  ALFTranslator::emitIntCast(Value* Operand, unsigned BitWidthSrc, unsigned BitWidthDst, bool signExtend) {
   if(BitWidthSrc > BitWidthDst) { // truncate
     Output.startList("select");
     Output.atom(BitWidthSrc);
     Output.atom(0);
     Output.atom(BitWidthDst - 1);
-    emitOperand(Operand);
+    /*emitOperand()*/(void)buildOperand(Operand);
     Output.endList("select");
   } else if(BitWidthSrc < BitWidthDst) {
     if(signExtend) {
       Output.startList("s_ext");
       Output.atom(BitWidthSrc);
       Output.atom(BitWidthDst);
-      emitOperand(Operand);
+      /*emitOperand()*/(void)buildOperand(Operand);
       Output.endList("s_ext");
     } else {
       unsigned ZExtWidth = BitWidthDst - BitWidthSrc;
@@ -1492,28 +1567,28 @@ void  ALFWriter::emitIntCast(Value* Operand, unsigned BitWidthSrc, unsigned BitW
       Output.atom(ZExtWidth);
       Output.atom(BitWidthSrc);
       Output.dec_unsigned(ZExtWidth,0);
-      emitOperand(Operand);
+      /*emitOperand()*/(void)buildOperand(Operand);
       Output.endList("conc");
     }
   } else {
-    emitOperand(Operand);
+    /*emitOperand()*/(void)buildOperand(Operand);
   }
 }
 
 // Emit a cast between floating point types
-void  ALFWriter::emitFPCast(Value* Operand, Type* SrcTy, Type* DstTy, bool isTrunc) {
+void  ALFTranslator::emitFPCast(Value* Operand, Type* SrcTy, Type* DstTy, bool isTrunc) {
 
   Output.startList("f_to_f");
   Output.atom(getExpWidth(SrcTy));
   Output.atom(getExpWidth(DstTy));
   Output.atom(getFracWidth(SrcTy));
   Output.atom(getFracWidth(DstTy));
-  emitOperand(Operand);
+  /*emitOperand()*/(void)buildOperand(Operand);
   Output.endList("f_to_f");
 }
 
 // Emit cast from floating point to integer
-void  ALFWriter::emitFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instruction::CastOps Opcode) {
+void  ALFTranslator::emitFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instruction::CastOps Opcode) {
 
 	string op;
 	switch(Opcode) {
@@ -1530,59 +1605,18 @@ void  ALFWriter::emitFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instr
 		  op = "s_to_f";
 		  break;
 	  default:
-		  report_fatal_error("emitFPIntCast: invalid opcode: "+utostr(Opcode));
+		  alf_fatal_error("emitFPIntCast: invalid opcode: "+utostr(Opcode));
 	}
 	Output.startList(op);
 	Output.atom(getExpWidth(FloatTy));
 	Output.atom(getFracWidth(FloatTy));
 	Output.atom(getBitWidth(IntTy));
-	emitOperand(Operand);
+	/*emitOperand()*/(void)buildOperand(Operand);
 	Output.endList(op);
 }
 
-void ALFWriter::basicBlockHeader(const BasicBlock* BB) {
-    Output.newline();
-    Output.comment("--------- BASIC BLOCK " + BB->getName().str() + " ----------",false);
-    Output.newline();
-    Output.setStmtLabel(getBasicBlockLabel(BB));
-    Output.incrementIndent();
-    IsBasicBlockStart = true;
-}
 
-void ALFWriter::statementHeader(const Instruction &I, unsigned Index) {
-
-    Output.comment("LLVM expression: " + I.getParent()->getParent()->getName().str() + "::" +
-                   I.getParent()->getName().str(), false);
-    /* output all LLVM instructions combined in this ALF statement. Note that the dependency
-     * relation is acyclic if all PHI nodes are removed
-     */
-    std::vector<const Instruction *> Worklist, Instructions;
-    Worklist.push_back(&I);
-    while(! Worklist.size() == 0) {
-        const Instruction *Ins = Worklist.back();
-        Worklist.pop_back();
-        Instructions.push_back(Ins);
-        for(Instruction::const_op_iterator OI = Ins->op_begin(), OE = Ins->op_end(); OI != OE; ++OI) {
-            if(Instruction* Op = dyn_cast<Instruction>(OI)) {
-                if(isa<PHINode>(Op)) continue;
-                if(! isInlinableInst(*Op)) continue;
-                Worklist.push_back(Op);
-            }
-        }
-    }
-    for(std::vector<const Instruction*>::const_reverse_iterator II = Instructions.rbegin(), IE = Instructions.rend(); IE != II; ++ II) {
-        Output.comment("  " + valueToString(**II), false);
-    }
-
-    CurrentStatementIndex = Index;
-    if(! IsBasicBlockStart) {
-        Output.setStmtLabel(getInstructionLabel(I.getParent(),Index));
-    } else {
-        IsBasicBlockStart = false;
-    }
-}
-
-std::string ALFWriter::getValueName(const Value *Operand) {
+std::string ALFTranslator::getValueName(const Value *Operand) {
 
   // Resolve potential alias.
   if (const GlobalAlias *GA = dyn_cast<GlobalAlias>(Operand)) {
@@ -1605,7 +1639,7 @@ std::string ALFWriter::getValueName(const Value *Operand) {
   return "%"+Name;
 }
 
-std::string ALFWriter::getBasicBlockLabel(const BasicBlock* BB) {
+std::string ALFTranslator::getBasicBlockLabel(const BasicBlock* BB) {
   std::string name;
   if(! BB->hasName()) {
 	  name = getAnonValueName(BB);
@@ -1615,15 +1649,15 @@ std::string ALFWriter::getBasicBlockLabel(const BasicBlock* BB) {
   return BB->getParent()->getName().str() + "::" + name;
 }
 
-std::string ALFWriter::getInstructionLabel(const BasicBlock *BB, unsigned Index) {
+std::string ALFTranslator::getInstructionLabel(const BasicBlock *BB, unsigned Index) {
     return getBasicBlockLabel(BB) + "::" + utostr(Index);
 }
 
-std::string ALFWriter::getConditionalJumpLabel(const BasicBlock* Pred, const BasicBlock* Succ) {
+std::string ALFTranslator::getConditionalJumpLabel(const BasicBlock* Pred, const BasicBlock* Succ) {
     return getBasicBlockLabel(Pred) + "::edge::" + getBasicBlockLabel(Succ);
 }
 
-std::string ALFWriter::getAnonValueName(const Value* Operand) {
+std::string ALFTranslator::getAnonValueName(const Value* Operand) {
 	unsigned &No = AnonValueNumbers[Operand];
 	if (No == 0) {
 		No = ++NextAnonValueNumber;
@@ -1632,23 +1666,18 @@ std::string ALFWriter::getAnonValueName(const Value* Operand) {
 	return utostr(No);
 }
 
-/// ALF name for volatile storage of the given type
-std::string ALFWriter::getVolatileStorage(Type* Ty) {
-	return "$volatile_" + utostr(getBitWidth(Ty));
-}
-
-uint64_t ALFWriter::getBitOffset(CompositeType* Ty, uint64_t Index) {
+uint64_t ALFTranslator::getBitOffset(CompositeType* Ty, uint64_t Index) {
 
 	if(StructType *StrucTy = dyn_cast<StructType>(Ty)) {
 		return TD->getStructLayout(StrucTy)->getElementOffsetInBits(Index);
 	} else if(const SequentialType *SeqTy = dyn_cast<SequentialType>(Ty)) {
 		return TD->getTypeAllocSize(SeqTy->getElementType()) * Index * 8;
 	} else {
-		report_fatal_error ("[llvm2alf] getBitOffset: CompositeType which is neither struct nor sequential");
+		alf_fatal_error("getBitOffset: CompositeType which is neither struct nor sequential", *Ty);
 	}
 }
 
-std::pair<Value*, uint64_t> ALFWriter::getBitOffset(CompositeType* Ty, Value* Index) {
+std::pair<Value*, uint64_t> ALFTranslator::getBitOffset(CompositeType* Ty, Value* Index) {
 
     if (ConstantInt* CI = dyn_cast<ConstantInt>(Index)) {
         uint64_t Offset = getBitOffset(Ty, CI->getLimitedValue());
@@ -1658,14 +1687,14 @@ std::pair<Value*, uint64_t> ALFWriter::getBitOffset(CompositeType* Ty, Value* In
         unsigned ElementBitWidth = TD->getTypeAllocSize(SeqTy->getElementType()) * 8;
         return std::make_pair(Index, ElementBitWidth);
     } else {
-        report_fatal_error ("[llvm2alf] visitGetElementPtrInst: Unexpected/Unsupported type in address arithmetic");
+        alf_fatal_error("visitGetElementPtrInst: Unexpected/Unsupported type in address arithmetic", *Ty);
     }
 }
 
 
 // This converts the llvm constraint string to something gcc is expecting.
 // TODO: currently unused
-std::string ALFWriter::interpretASMConstraint(InlineAsm::ConstraintInfo& c) {
+std::string ALFTranslator::interpretASMConstraint(InlineAsm::ConstraintInfo& c) {
   assert(c.Codes.size() == 1 && "Too many asm constraint codes to handle");
 
   const char *const *table = TAsm->getAsmCBE();
