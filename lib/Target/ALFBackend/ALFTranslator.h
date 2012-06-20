@@ -1,4 +1,4 @@
-//===-- ALFWriter.h - Library for converting LLVM code to ALF (Artist2 Language for Flow Analysis) --------------===//
+//===-- ALFTranslator.h - Library for converting LLVM code to ALF (Artist2 Language for Flow Analysis) --------------===//
 //
 //                     Benedikt Huber, <benedikt@vmars.tuwien.ac.at>
 //                     Adapted from the C Backend (The LLVM Compiler Infrastructure)
@@ -8,12 +8,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// The ALFWriter class is responsible for generating ALF code, and is usually
-// used by the ALFWriter class, which traverses the input module
+// The ALFTranslator class is responsible for generating ALF code, and is usually
+// used by the ALFTranslator class, which traverses the input module
 //
 //===----------------------------------------------------------------------===//
-#ifndef __ALF_WRITER_H__
-#define __ALF_WRITER_H__
+#ifndef __ALF_TRANSLATOR_H__
+#define __ALF_TRANSLATOR_H__
 
 #include "llvm/Constants.h"
 #include "llvm/InlineAsm.h"
@@ -25,18 +25,22 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/Target/TargetData.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
-
+#include "ALFBuilder.h"
 
 // Allow expressions for select instructions
 // Lowers the precision of the restriction mechanism of SWEET
 #undef ENABLE_SELECT_EXPRESSIONS
 
-#define ALF_DEBUG_HOT(x) (x)
-#define ALF_DEBUG(x)
-
+using namespace alf;
 
 /* utility functions (local to the translation unit */
 namespace {
+
+/// Global Variables Classes and Static CTor/DTor
+enum SpecialGlobalClass {
+    NotSpecial = 0,
+    GlobalCtors, GlobalDtors, OtherMetadata
+};
 
 /// Check whether this instruction is a pointer <-> pointer bitcast
 inline bool isPtrPtrBitCast(const Instruction &I) {
@@ -55,7 +59,7 @@ inline bool isPtrPtrBitCast(const ConstantExpr &CE) {
 /// and assigning the address of that variable to the left-hand-side of the
 /// alloca. It is not required that the alloca is in the entry block,
 /// so AI->isStaticAlloca() is a stronger predicate than isStaticSizeAlloca(AI)
-const AllocaInst *isStaticSizeAlloca(const Value *V) {
+inline const AllocaInst *isStaticSizeAlloca(const Value *V) {
   const AllocaInst *AI = dyn_cast<AllocaInst>(V);
   // not an alloca instruction
   if (!AI) return 0;
@@ -72,7 +76,7 @@ inline bool isInlineAsm(const Instruction& I) {
 }
 
 /// Convert a Value into a String (for debugging purposes)
-std::string valueToString(const Value& V) {
+inline std::string valueToString(const Value& V) {
 	std::string s;
 	raw_string_ostream os(s);
 	V.print(os);
@@ -80,7 +84,7 @@ std::string valueToString(const Value& V) {
 }
 
 /// Convert a type into a String (for debugging purposes)
-std::string typeToString(const Type& T) {
+inline std::string typeToString(const Type& T) {
 	std::string s;
 	raw_string_ostream os(s);
 	T.print(os);
@@ -91,11 +95,23 @@ std::string typeToString(const Type& T) {
 
 namespace llvm {
 
-  /// Report a fatal error with debugging information included
-  LLVM_ATTRIBUTE_NORETURN void alf_fatal_error(const string& Reason, Instruction& Ins);
+  /// Global Variables Classes and Static CTor/DTor
+  enum SpecialGlobalClass {
+      NotSpecial = 0,
+      GlobalCtors, GlobalDtors, OtherMetadata
+  };
 
-  /// Report a fatal error for a
-  LLVM_ATTRIBUTE_NORETURN void alf_fatal_error(const string& Reason, Instruction& Ins);
+  /// Report a fatal error (in context of Function F)
+  LLVM_ATTRIBUTE_NORETURN void alf_fatal_error(const Twine& Reason, const Function* F = 0);
+
+  /// Report a fatal error with debugging information for the given Instruction included
+  LLVM_ATTRIBUTE_NORETURN void alf_fatal_error(const Twine& Reason, Instruction& Ins);
+
+  /// Report a fatal error, with debugging information on a Type included
+  LLVM_ATTRIBUTE_NORETURN void alf_fatal_error(const Twine& Reason, const Type& Ty);
+
+  /// Emit a warning
+  void alf_warning(const Twine& Msg);
 
   /// Specification of areas of memory which are addressed using absolute addresses
   class MemoryArea {
@@ -129,27 +145,36 @@ namespace llvm {
 
   };
 
-  /// ALFWriter - This class is used to generate ALF code for LLVM expressions and various
+  /// ALFTranslator - This class is used to generate ALF code for LLVM expressions and various
   /// other constructs found in the LLVM IR
   /// The visitor only deals with ALF expressions, not ALF statements.
   /// The latter are handled in ALFBackend directly
-  class ALFWriter : public InstVisitor<ALFWriter> {
+  class ALFTranslator : public InstVisitor<ALFTranslator> {
 
 	/// Least Addressable Unit
     unsigned LeastAddrUnit;      // Least Addressable Unit
 
-    /// ALF output stream
-    ALFOutput& Output;
+    /// ALF Builder
+    ALFBuilder& Builder;
+    ALFOutput& Output; // XXX: remove me
+
+    /// State for adding statements: Current ALF Function
+    ALFFunction *AF;
+
+    /// State for adding statements: Current ALF Statement Group
+    ALFStatementGroup *CurrentBlock;
+
+    /// State for adding statements: current instruction index
+    unsigned CurrentStatementIndex;
+
+    /// State for generating expressions via visitors
+    SExpr* BuiltExpr;
 
     /// Output Configuration
     bool IgnoreVolatiles;
 
     /// Memory Areas
     std::vector<MemoryArea> MemoryAreas;
-
-    /// Labeling
-    unsigned IsBasicBlockStart;
-    unsigned CurrentStatementIndex;
 
 	/// unique name generation and counters
     DenseMap<const Value*, unsigned> AnonValueNumbers;
@@ -182,9 +207,10 @@ namespace llvm {
 	/// Type of (case,target) list for switch instructions
 	typedef SmallVector< std::pair<Value*, BasicBlock*> , 32> CaseVector;
 
-	explicit ALFWriter(ALFOutput &O, unsigned lau, bool FlagIgnoreVolatiles)
+	explicit ALFTranslator(ALFBuilder &B, unsigned lau, bool FlagIgnoreVolatiles)
       : LeastAddrUnit(lau),
-        Output(O),
+        Builder(B),
+        Output(B.getOutput()),
         IgnoreVolatiles(FlagIgnoreVolatiles),
         NextAnonValueNumber(0),
         TD(0), TCtx(0), TAsm(0), Mang(0)  // initialized in 'initializeTarget
@@ -206,16 +232,24 @@ namespace llvm {
 	mem_areas_iterator mem_areas_begin()  { return MemoryAreas.begin(); }
 	mem_areas_iterator mem_areas_end()    { return MemoryAreas.end(); }
 
-    virtual ~ALFWriter() {
+    virtual ~ALFTranslator() {
     	delete TCtx;
     	delete Mang;
     }
+    /// translate a function
+    void translateFunction(const Function *F, ALFFunction *AF);
+
+    /// translate a basic block
+    void processBasicBlock(const BasicBlock *BBconst, ALFFunction *AF);
 
     /// emit the signature for a function
-    void emitFunctionSignature(const Function *F);
+    void processFunctionSignature(const Function *F, ALFFunction *AF);
 
-    // Temporary Store
-    void emitTemporaryStore(Instruction *I);
+    /// add a statement to the builder
+    void addStatement(const Instruction& Ins, unsigned Index, SExpr *Code);
+
+    /// Build ALF expression from LLVM expression
+    SExpr* buildExpression(Value *Expression);
 
     /// Emit initializers (zero or more) for the specified global variable
     void emitInitializers(Module &M, GlobalVariable &V,unsigned BitOffset, Constant* C);
@@ -247,16 +281,27 @@ namespace llvm {
     /// Emit a (atomic) initializer statement for ALF
     void emitInitializer(GlobalVariable &V, unsigned BitOffset, Constant* C);
 
-    //  Constants
-    void emitConstant(Constant* Const);
-    void emitGlobalValue(const GlobalValue *GV, uint64_t BitOffset);
-    void emitConstantExpression(const ConstantExpr * CE);
+    // ---  Constants
+
+    /// generate ALF code representing a constant
+    SExpr* buildConstant(Constant* Const);
+
+    /// generate ALF code representing a global value
+    SExpr* buildGlobalValue(const GlobalValue *GV, uint64_t BitOffset);
+
+    /// generate ALF code representing a constant expression
+    SExpr* buildConstantExpression(const ConstantExpr * CE);
+
+    /// Constant Folding
     std::auto_ptr<ALFConstant> foldConstant(const Constant* Const);
+
+    /// Constant Folding
     std::auto_ptr<ALFConstant> foldBinaryConstantExpression(const ConstantExpr* CE);
+
     uint64_t getConstantPointerOffset(const ConstantExpr* CE);
 
     // Instruction visitation functions
-    friend class InstVisitor<ALFWriter>;
+    friend class InstVisitor<ALFTranslator>;
 
     // LLVM IR Statement Instructions
     void visitReturnInst(ReturnInst &I);
@@ -266,7 +311,7 @@ namespace llvm {
     void visitUnreachableInst(UnreachableInst &I);
     void visitCallInst (CallInst &I);
     void visitInlineAsm(CallInst &I);
-    bool visitBuiltinCall(CallInst &I, Intrinsic::ID ID, bool &WroteCallee);
+    bool visitBuiltinCall(CallInst &I, Intrinsic::ID ID);
     void visitAllocaInst(AllocaInst &I);
     void visitStoreInst (StoreInst  &I);
     void visitInsertElementInst(InsertElementInst &I);
@@ -274,7 +319,7 @@ namespace llvm {
     void visitInsertValueInst(InsertValueInst &I);
 
     void visitInvokeInst(InvokeInst &I) {
-      report_fatal_error("LLVM -> ALF: invoke instruction not eliminated by lowerinvoke pass!");
+        alf_fatal_error("invoke instruction not eliminated by lowerinvoke pass!", I);
     }
 
     // LLVM IR Expression Instructions
@@ -290,16 +335,15 @@ namespace llvm {
     void visitExtractValueInst(ExtractValueInst &I);
 
     void visitVAArgInst (VAArgInst &I) {
-        report_fatal_error("ALF Backend: VAArgInst not yet supported " + valueToString(I));
+        alf_fatal_error("VAArgInst not yet supported",I);
     }
     void visitInstruction(Instruction &I) {
-    	report_fatal_error("ALFWriter: not expressible as ALF expression: "+valueToString(I));
+        alf_fatal_error("Unsupported Instruction Type", I);
     }
 
     // Expressions
-    void emitOperand(Value *Operand);
-    void emitExpression(Value *Expression);
-    void emitLoad(Value* Operand);
+    SExpr* buildOperand(Value *Operand);
+    SExpr* buildLoad(Value* Operand);
 
     /// cast between integer and floating point types
     void emitIntCast(Value* Ptr, unsigned BitWidthSrc, unsigned BitWidthTarget, bool signExtend);
@@ -413,6 +457,11 @@ namespace llvm {
     void basicBlockHeader(const BasicBlock* BB);
     void statementHeader(const Instruction &I, unsigned Index);
 
+    /// ALF name for volatile storage of the given type
+    std::string getVolatileStorage(Type* Ty) {
+        return "$volatile_" + utostr(getBitWidth(Ty));
+    }
+
     /// ALF variable name of some Value (except BasicBlock labels, see getBasicBlockLabel)
     std::string getValueName(const Value *Operand);
 
@@ -428,8 +477,6 @@ namespace llvm {
 	/// ALF name for anonymous values
     std::string getAnonValueName(const Value* Operand);
 
-    /// ALF name for volatile storage of the given type
-    std::string getVolatileStorage(Type* Ty);
 
     /// Get bit offset of subtype at Index of a composite type
     uint64_t getBitOffset(CompositeType* Ty, uint64_t Index);
@@ -458,6 +505,10 @@ namespace llvm {
       assert(bits % LeastAddrUnit == 0 && "bitsToLAU: Addressing Errror");
       return bits / LeastAddrUnit;
     }
+  private:
+    /// Collect all LLVM instructions combined in the ALF statement for the given instruction
+    void getStatementInstructions(const Instruction &Ins, std::vector<const Instruction*> &InsList);
+
   };
 }
 
