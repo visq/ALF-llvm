@@ -1,0 +1,62 @@
+%This is a template for producing OASIcs articles.
+%See oasics-manual.pdf for further information.
+
+\documentclass[a4paper,USenglish]{oasics}
+  %for A4 paper format use option "a4paper", for US-letter use option "letterpaper"
+  %for british hyphenation rules use option "UKenglish", for american hyphenation rules use option "USenglish"
+
+\usepackage{microtype}%if unwanted, comment out or use option "draft"
+
+%\graphicspath{{./graphics/}}%helpful if your graphic files are in another directory
+\graphicspath{{./logos/}{./figures/}}%
+
+\bibliographystyle{plain}% the recommended bibstyle
+
+% Author macros %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\title{The LLVM ALFBackend 3.1}
+%\titlerunning{A Sample OASIcs Article} %optional, in case that the title is too long; the running title should fit into the top page column
+
+\author[1]{Benedikt Huber}
+\affil[1]{ Institute of Computer Engineering\\
+  Vienna University of Technology, Austria\\
+  \texttt{benedikt@vmars.tuwien.ac.at}}
+\authorrunning{B. Huber}%optional. First: Use abbreviated first/middle names. Second (only in severe cases): Use first author plus 'et. al.'
+
+\Copyright[nc-nd]%choose "nd" or "nc-nd"
+          {Benedikt Huber}
+
+\subjclass{C.3 Real-Time and Embedded Systems} % mandatory: Please choose ACM 1998 classifications from http://www.acm.org/about/class/ccs98-html . E.g., cite as "F.1.1 Models of Computation".
+\keywords{}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+%%
+%% configuration that can only go into the preamble
+%%
+\input{config}
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+
+\maketitle
+
+
+%%
+%% MAIN CONTENT LOCATED IN A SEPARATE DOCUMENT
+%%
+\input{content}
+
+
+
+%%
+%% Bibliography
+%%
+\bibliography{references}
+
+
+
+\end{document}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+

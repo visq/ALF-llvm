@@ -1,0 +1,127 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% CUSTOM DEFINITIONS
+%
+
+
+\begin{abstract}
+%Problem statement:
+%Motivation:
+%Approach:
+%Results: (numbers! no? okay...)
+%Conclusions:
+\end{abstract}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% Section I: Introduction
+%
+\section{The Artist Design Flow Language}
+\label{sec:alf}
+% Motivation
+In this section, we describe the ALF language, and how it is represented in the
+LLVM translator.
+
+\subsection{Language Characteristics}
+
+\subsubsection{Memory Model}
+\label{par:memorymodel}
+
+The ALF memory model is a Harward-style architecture with separated code and
+data address spaces. The code memory comprises a list of functions, with each
+function consisting of a list of statements. The statements within a function
+may further be partitioned into scopes \footnote{Scopes are similar to blocks in
+C, and may declare additional local variables}, although this feature is not
+used here. Both functions and statements are identified by labels.
+
+The data memory is organized into frames, which are identified by frame
+references (a name). Frames are non-overlapping and their size is fixed at
+creation time. References to data memory are called addresses, and consist of a
+frame reference and an offset. The offset has to be a multiple of the
+least-addressable unit (LAU) in bits. This memory model does not allow for
+self-modifying code, or overlapping data memory regions, but is well suited to
+reflect both C and the LLVM intermediate language.
+
+\subsubsection{Code Structure}
+\label{par:structure}
+An ALF module consists of functions, global variables, and global
+variable initializations. Variables (both those local to a scope and
+global ones) correspond to a data frame with constant size. Functions
+are identified by a unique label, and can be imported or
+exported. Functions consist of (possibly nested) scopes; each scope
+contains a set local variables, initializations, and a list of
+statements. Global variables are either defined (\emph{allocated}) in
+the current module, or imported.
+
+\subsubsection{Types and Values}
+ALF distinguishes four fundamentally different types of values:
+\begin{itemize}
+\item Integers of with $n$ bits; for example, \verb|dec_unsigned 32 7| has type \verb|int<32>|.
+\item Floating point values of different precision (currently not precisely specified)
+\item Labels (pairs of label references and offsets), for example \verb|label "main::bb1" 0|.
+We do not use the offset part of labels here.
+\item Addresses (pairs of frame reference and offset), for example \verb|addr "%arg" 32|
+\end{itemize}
+
+\subsection{Generating ALF Files}
+This section describes the most important parts of the API to generate
+ALF files. To translate the control-flow structure, we define a unique
+translation scheme for function and statement labels, and
+variables. Although ALF itself does not include the concept of basic
+blocks, the concept is present in the naming translation -- the first
+statement in a basic block is labelled with the name of the basic
+block.
+
+\subsubsection{Naming Scheme}
+We use the following name translation $\mathcal{T}$ from LLVM names to ALF names:
+\begin{itemize}
+\item Functions $F$: $\mathcal{T}(F) = F_{\text{name}}$
+\item First statement $S_0$ in basic block $F.B$: $\mathcal{T}(F.B.S_0) =
+      F_{\text{name}}\texttt{::}B_{\text{name}}$
+\item Statement $S_i, i > 0$ in basic block $F.B$: $\mathcal{T}(F.B.S_i) =
+      F_{\text{name}}\texttt{::}B_{\text{name}}\texttt{::}i$
+\item Global variable $v$: $\mathcal{T}(v) = v_{\text{name}}$
+\item Special (global) variable $v$: $\mathcal{T}(v) = \texttt{\$}v_{\text{name}}$
+\item Local Variable (instruction) $v$: $\mathcal{T}(v) = \texttt{\%}v_{\text{name}}$
+\end{itemize}
+
+\subsubsection{Metainformation}
+
+\subsection{Builder Application Programming Interface}
+In the current design of the LLVM ALF Backend, we still tried to keep
+the interface as simple and straightforward as possible, while adding
+enough flexibility to maintain precise mapping between LLVM constructs
+and ALF constructs.
+
+\subsubsection{Simple Memory Management}
+Memory Management is (in the spirit of LLVM) kept as simple as possible. Modules
+own Functions, Functions own Scopes, Scopes own Statements. Modules, Functions
+and Scopes are Contexts, which may create (and subsequently own) S-Expressions.
+For strings, we use the following strategy: During the construction of Strings,
+the Twine data structure is used. The owner of the string then converts Twines
+to ordinary strings. References to those strings are finally represented by the
+\texttt{StringRef} type in the LLVM ADT library.
+
+\subsubsection{API}
+This is reflected in the following simple API:
+
+\begin{lstlisting}
+  class Module;
+  class Function;
+
+  Function Module::addFunction(Name, Exported);
+  Scope Function::addScope()
+  void Module::addVariable(Name,Size,Exported,VariableInfo);
+  void Scope::addVariable(Name,Size,VariableInfo)
+  Expression Module::createExpression(SExpr, ExpressionInfo)
+  void Scope::addStatement(Name, SExpr, StatementInfo);
+
+  SExprAtom* Context::atom(Name)
+  SExprList* Context::list(Name)
+  void SExprList::append(SExpr*)
+\end{lstlisting}
+\subsubsection{Variables}
+
+\begin{lstlisting}
+\end{lstlisting}
