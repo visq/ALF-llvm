@@ -158,8 +158,8 @@ namespace llvm {
     ALFBuilder& Builder;
     ALFOutput& Output; // XXX: remove me
 
-    /// State for adding statements: Current ALF Function
-    ALFFunction *AF;
+    /// Context for creating expression: either global or current ALF function
+    ALFContext *ACtx;
 
     /// State for adding statements: Current ALF Statement Group
     ALFStatementGroup *CurrentBlock;
@@ -214,7 +214,9 @@ namespace llvm {
         IgnoreVolatiles(FlagIgnoreVolatiles),
         NextAnonValueNumber(0),
         TD(0), TCtx(0), TAsm(0), Mang(0)  // initialized in 'initializeTarget
-	{ }
+	{
+	    this->ACtx = &Builder;
+	}
 
 	void initializeTarget(const MCAsmInfo* _TAsm, const TargetData* _TD, const MCRegisterInfo *_MRI) {
   	  TAsm = _TAsm;
@@ -248,38 +250,31 @@ namespace llvm {
     /// add a statement to the builder
     void addStatement(const Instruction& Ins, unsigned Index, SExpr *Code);
 
+    /// set the result of a instruction visitor for 'expression' instructions
+    void setVisitorResult(const Instruction& Ins, SExpr *Expr) {
+        assert(Expr && "setVisitorResult: null pointer");
+        assert(isExpressionInst(Ins) && "setVisitorResult: LLVM instruction does not correspond to ALF expression, but ALF Statement");
+        BuiltExpr = Expr;
+    }
+
     /// Build ALF expression from LLVM expression
     SExpr* buildExpression(Value *Expression);
 
-    /// Emit initializers (zero or more) for the specified global variable
-    void emitInitializers(Module &M, GlobalVariable &V,unsigned BitOffset, Constant* C);
+    /// Add initializers (zero or more) for the specified global variable
+    void addInitializers(Module &M, GlobalVariable &V,unsigned BitOffset, Constant* C);
 
-    /// Emit initializers for a vector or array type
+    /// Add initializers for a vector or array type
     template<typename Const>
-    void emitCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Const* C);
+    void addCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Const* C);
 
-    /// Emit initializers for a struct type
-    void emitStructInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantStruct* Const);
+    /// Add initializers for a struct type
+    void addStructInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantStruct* Const);
 
     /// Check whether ConstantExpr can be initialized using a single ALF initializer entry
-    bool hasSimpleInitializer(ConstantExpr* ConstExpr) {
-    	// Ptr2Ptr Bitcasts, GEPs and Global Variables or ok
-    	Constant* Const = ConstExpr;
-    	while(Const) {
-    		ConstantExpr* CE = dyn_cast<ConstantExpr>(Const);
-    		if(CE && isPtrPtrBitCast(*CE)) {
-    			Const = CE->getOperand(0);
-    		} else if(CE && CE->getOpcode() == Instruction::GetElementPtr) {
-    			Const = CE->getOperand(0);
-    		} else {
-    			return isa<GlobalValue>(Const);
-    		}
-    	}
-    	return true;
-    }
+    bool hasSimpleInitializer(ConstantExpr* ConstExpr);
 
-    /// Emit a (atomic) initializer statement for ALF
-    void emitInitializer(GlobalVariable &V, unsigned BitOffset, Constant* C);
+    /// Build an (atomic) initializer statement for ALF
+    void addInitializer(GlobalVariable &V, unsigned BitOffset, Constant* C);
 
     // ---  Constants
 
@@ -346,13 +341,13 @@ namespace llvm {
     SExpr* buildLoad(Value* Operand);
 
     /// cast between integer and floating point types
-    void emitIntCast(Value* Ptr, unsigned BitWidthSrc, unsigned BitWidthTarget, bool signExtend);
-    void emitFPCast(Value* Operand, Type* SrcTy, Type* DstTy, bool isTrunc);
-    void emitFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instruction::CastOps op);
+    SExpr* buildIntCast(Value* Ptr, unsigned BitWidthSrc, unsigned BitWidthTarget, bool signExtend);
+    SExpr* buildFPCast(Value* Operand, Type* SrcTy, Type* DstTy, bool isTrunc);
+    SExpr* buildFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instruction::CastOps op);
 
-    void emitMultiplication(unsigned BitWidth, Value* Op1, Value* Op2);
-    void emitPointer(Value *Ptr, uint64_t Offset);
-    void emitPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, uint64_t> >& Offsets);
+    SExpr* buildMultiplication(unsigned BitWidth, Value* Op1, Value* Op2);
+    SExpr* buildPointer(Value *Ptr, uint64_t Offset);
+    SExpr* buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, uint64_t> >& Offsets);
 
     std::string interpretASMConstraint(InlineAsm::ConstraintInfo& c);
 
@@ -415,7 +410,7 @@ namespace llvm {
 
       // Must be an expression, must be used exactly once.  If it is dead, we
       // emit it inline where it would go.
-      if (    ! isExpressionInst(I)
+      if (! isExpressionInst(I)
            || isa<LoadInst>(I)) /* simplest solution to read-after-write hazards */
           return false;
 
@@ -434,28 +429,24 @@ namespace llvm {
       return I.getParent() == cast<Instruction>(I.use_back())->getParent();
     }
 
-    /// Emit code for an unconditional jump
+    /// Add statements for an unconditional jump
     void emitUnconditionalJump(BasicBlock* Block, BasicBlock* Succ);
 
-    /// Emit code for a conditional branch or switch instruction
+    /// Add statements for a conditional branch or switch instruction
     void emitSwitch(TerminatorInst& SI, Value* Condition, const CaseVector& Cases, BasicBlock* DefaultCase);
 
-    /// Emit integer atom
-    void emitIntNumVal(const APInt& Value) {
-        Output.dec_unsigned(Value.getBitWidth(), Value);
+    /// Build integer atom
+    SExpr* buildIntNumVal(const APInt& Value) {
+        return ACtx->dec_unsigned(Value.getBitWidth(), Value.getLimitedValue());
     }
 
-    /// Emit floating point atom
-    void emitFloatNumVal(Type* FPTy, const APFloat& Value) {
-    	Output.float_val(getExpWidth(FPTy), getFracWidth(FPTy), Value);
+    /// Build floating point atom
+    SExpr* buildFloatNumVal(Type* FPTy, const APFloat& Value) {
+        return ACtx->float_val(getExpWidth(FPTy), getFracWidth(FPTy), Value);
     }
 
     /// Set all PHI variables of the successor block, assuming the predecessor is known
     void setPHICopiesForSuccessor(BasicBlock *PredBlock, BasicBlock* SuccBlock);
-
-    /// Labeling/Comments
-    void basicBlockHeader(const BasicBlock* BB);
-    void statementHeader(const Instruction &I, unsigned Index);
 
     /// ALF name for volatile storage of the given type
     std::string getVolatileStorage(Type* Ty) {

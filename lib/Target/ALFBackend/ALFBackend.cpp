@@ -336,7 +336,7 @@ void ALFBackend::processGlobalVariables(Module &M) {
           // All global variables (which are not special purpose) need to be initialized
           // The initializer, however, is allowed to be NULL
           if(! IsImported && !getGlobalVariableClass(I)) {
-              Translator.emitInitializers(M, *I, 0, I->getInitializer());
+              Translator.addInitializers(M, *I, 0, I->getInitializer());
           }
       }
     }

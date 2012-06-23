@@ -28,11 +28,12 @@ SExpr* ALFContext::identifier(const Twine& ident) {
     QuotedIdent << "\"";
     return atom(QuotedIdent.str());
 }
-void ALFBuilder::addInit(const Twine& Name, uint64_t Offset, SExpr* InitValue, bool Volatile) {
-    SExpr     *InitRef =  list("ref")->append(identifier(Name))->append(0ULL);
-    SExprList *Init = list("init")->append(InitRef)
-                              ->append(InitValue);
+void ALFBuilder::addInit(const Twine& Name, uint64_t Offset, SExpr* InitValue, bool Volatile, bool ReadOnly) {
+    SExprList *Ref  = list("ref")->append(identifier(Name))->append(offset(Offset));
+    SExprList *Init = list("init")->append(Ref)
+                                  ->append(InitValue);
     if(Volatile) Init->append("volatile");
+    if(ReadOnly) Init->append("read_only");
     Initializers.push_back(Init);
 }
 
@@ -77,10 +78,24 @@ void ALFBuilder::writeToFile(ALFOutput& Output) {
     }
     Output.endList("lrefs");
     Output.endList("imports");
+    // Global Declarations
+    Output.startList("decls");
+    for(std::vector<Frame*>::iterator I = GlobalFrames.begin(), E = GlobalFrames.end(); I!=E; ++I) {
+        if((*I)->getStorage() != ImportedFrame)
+            Output.alloc((*I)->getFrameRef(), (*I)->getBitWidth());
+    }
+    Output.endList("decls");
+    Output.startList("inits");
+    for(std::vector<SExpr*>::iterator I = Initializers.begin(), E = Initializers.end(); I!=E; ++I) {
+        Output.sexpr(*I);
+    }
+    Output.endList("inits");
     // Define Functions
+    Output.startList("funcs");
     for(std::vector<ALFFunction*>::iterator I = Functions.begin(), E = Functions.end(); I!=E; ++I) {
         writeFunction(*I, Output);
     }
+    Output.endList("funcs");
     Output.endList("alf");
 }
 

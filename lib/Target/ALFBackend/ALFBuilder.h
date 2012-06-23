@@ -226,6 +226,7 @@ public:
     }
     void setBitWidths(unsigned LRefBits, unsigned FRefBits, unsigned OffsetBits) {
         Config.setBitWidths(LRefBits, FRefBits, OffsetBits);
+        Output.setBitWidths(LRefBits, FRefBits, OffsetBits);
     }
     void setLittleEndian(bool IsLittleEndian) {
         Config.setLittleEndian(IsLittleEndian);
@@ -245,7 +246,7 @@ public:
         addFrame(FrameName, INFTY_BITS, Storage);
     }
 
-    void addInit(const Twine& Name, uint64_t Offset, SExpr* InitValue, bool Volatile);
+    void addInit(const Twine& Name, uint64_t Offset, SExpr* InitValue, bool Volatile, bool ReadOnly=false);
 
     ALFFunction* addFunction(const Twine& Name, const Twine& Label, const Twine& Comment) {
         ALFFunction *AF = new ALFFunction(&Config, Name, Label, Comment);

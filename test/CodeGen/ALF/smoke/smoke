@@ -1,0 +1,55 @@
+#!/usr/bin/env ruby
+# Smoke test for the ALF backend
+require 'fileutils'
+class FileName
+  def initialize(file)
+    @mod = file.sub(/\.[^.]+$/,'') # strip last extension
+    @file = file
+  end
+  def [](ext)
+    @mod + "." + ext
+  end
+  def to_s
+    @file
+  end
+end
+REPORTDIR='html'
+FileUtils.mkdir_p(REPORTDIR)
+ARGV.each do |file|
+  f = FileName.new(file)
+  report = File.open(File.join(REPORTDIR,f['html']),"w")
+  print("#{f.to_s.ljust(19)}")
+  report.puts("<h1>#{f}</h1>")
+
+  compile = "llc -march=alf -alf-standalone -alf-memory-areas=0x00-0xff -o #{f['alf']} #{f}"
+  report.puts("<p>Compile <pre>#{compile}</pre></p>")
+  unless system("#{compile} >#{f['llc.log']} 2>&1")
+    puts "Build failed"
+    report.print("<p>Failed</p>")
+    next
+  end
+
+  report.puts("<p>#{f} <pre>#{File.readlines(f.to_s).join('')}</pre></p>")
+  report.puts("<p>#{f['alf']} <pre>#{File.readlines(f['alf']).join('')}</pre></p>")
+
+  check = "sweet -i=#{f['alf']} -c"
+  report.puts("<h2>Abstract Execution</h2><p>Check <pre>#{check}</pre></p>")
+  unless system("#{check} >#{f['sweetc.log']} 2>&1")
+    puts "Check failed"
+    report.print("<p>Failed</p>")
+    next
+  end
+  ae = "sweet -i=#{f['alf']} annot=#{f['in']} outannot=#{f['obs']} -ae debug=trace"
+  report.puts("<p>Abstract Execution<pre>#{ae}</p>")
+  unless system("#{ae} >#{f['sweetae.log']} 2>&1")
+    puts "AE failed #{f['sweetae.log']}"
+    report.puts("<p>Failed:<pre>#{File.readlines(f['sweetae.log'])}</pre></p>")
+    next
+  end
+  if File.exist?(f['out'])
+    puts File.readlines(f['out'])
+  else
+    puts File.readlines('debug_msgs.txt')[-1]
+  end
+end
+

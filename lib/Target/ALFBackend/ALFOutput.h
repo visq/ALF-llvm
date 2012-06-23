@@ -72,9 +72,9 @@ namespace llvm {
           unsigned getBitsFRef()   { return BitsFRef; }
           unsigned getBitsOffset() { return BitsOffset; }
           unsigned getLeastAddrUnit() { return LeastAddrUnit; }
-          void setBitWidths(unsigned bitsFRef,unsigned bitsLRef, unsigned bitsOffset) {
-              BitsFRef = bitsFRef;
+          void setBitWidths(unsigned bitsLRef,unsigned bitsFRef, unsigned bitsOffset) {
               BitsLRef = bitsLRef;
+              BitsFRef = bitsFRef;
               BitsOffset = bitsOffset;
           }
 
@@ -203,6 +203,9 @@ namespace llvm {
                       Out << "\\/";
                   } else {
                       Out << *i;
+                  }
+                  if(*i == '\n') {
+                      for(unsigned i = 0; i < Indent+2 && i < MaxIndent; ++i) Out << ' ';
                   }
               }
               Out << " */";
@@ -347,11 +350,15 @@ namespace llvm {
               endList("dec_unsigned");
           }
 
-          void alloc(string Id, unsigned Size) {
+          void alloc(string Id, uint64_t Size) {
               startList("alloc");
               atom(BitsFRef);
               identifier(Id);
-              atom(Size);
+              if(Size == ~0ULL) {
+                  atom("inf");
+              } else {
+                  atom(Size);
+              }
               endList("alloc");
           }
 
