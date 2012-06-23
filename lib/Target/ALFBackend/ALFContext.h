@@ -65,16 +65,52 @@ class ALFContext : public SExprContext {
 public:
     ALFContext(ALFConfiguration* config) : Config(config ){
     }
+    ALFConfiguration *getConfig() {
+        return Config;
+    }
+    // * basic builders
 
-    /// basic builders
+    /// undefined
+    SExpr* undefined(unsigned BitWidth) {
+        return list("undefined")->append(BitWidth);
+    }
+    /// array of values
     SExpr* const_repeat(SExpr *Value, uint64_t N) {
         return list("const_repeat")->append(Value)->append(N);
     }
+    /// decimal value
     SExpr* dec_unsigned(unsigned BitWidth, uint64_t Value) {
         return list("dec_unsigned")->append(BitWidth)->append(Value);
     }
+    /// float value
+    SExpr* float_val(unsigned ExpBitWidth, unsigned FracBitWidth, const APFloat& Value) {
 
+        unsigned totalBitWidth = 1 + ExpBitWidth + FracBitWidth;
+        if(Value.isInfinity() || Value.isNaN()) {
+            return undefined(totalBitWidth);
+        }
+        SExprList *FV = list("float_val")
+                ->append(ExpBitWidth)
+                ->append(FracBitWidth);
+        llvm::SmallString<64> buffer;
+        Value.toString(buffer);
+
+        /* if there are only digits in the buffer, we need to add a '.' */
+        bool onlyDigits = true;
+        for(llvm::SmallString<64>::iterator I = buffer.begin(), E = buffer.end(); I!=E; ++I) {
+            if(! isdigit(*I) && *I != '-') onlyDigits=false;
+        }
+        if(onlyDigits) {
+            buffer.append(StringRef("."));
+        }
+
+        FV->append(buffer.str().str()); // WTF?
+        return FV;
+    }
+
+    /// identifier
     SExpr* identifier(const Twine& Name);
+
 
     // FIXME: should be StringRef
     SExpr* address(const Twine& Name, uint64_t OffsetInBits = 0) {
@@ -98,6 +134,8 @@ public:
                 ->append(Config->getBitsOffset())
                 ->append(OffsetInBits / Config->getLAU());
     }
+
+    // * Statements / Expressions
     SExpr* jump(const Twine &Id, uint64_t Offset = 0, uint64_t Leaving = 0) {
         return list("jump")
                 ->append(labelRef(Id,Offset))
