@@ -33,9 +33,6 @@ using namespace llvm;
 namespace llvm {
 
 
-    enum ALFType { ALFInteger, ALFFloat, ALFAddress };
-    class ALFConstant;
-
     class ALFOutput {
 
       private:
@@ -46,9 +43,6 @@ namespace llvm {
           unsigned MaxIndent,Indent;
           enum { LAYOUT_NONE = 0, LAYOUT_ONELINE = 1, LAYOUT_MULTILINE = 2 };
           unsigned StateLayout;
-
-          std::string CurrentLabel;
-          uint64_t CurrentLabelOffset;
 
           bool UseMacros;
           unsigned LeastAddrUnit;
@@ -235,6 +229,7 @@ namespace llvm {
                   atom(Atom->getValue());
               }
           }
+
           // Stuff below here will be move to ALFContext/ALFBuilder eventually
           void undefined(unsigned BitWidth) {
             startList("undefined",true);
@@ -290,49 +285,6 @@ namespace llvm {
               endList("label");
           }
 
-          // === Statements ===
-
-          // change the current statement label
-          void setStmtLabel(string Label) {
-              CurrentLabel = Label;
-              CurrentLabelOffset = 0;
-          }
-
-          // emit a statement label; each statement must have at exactly one unique
-          // label; we use label offsets to generate unique labels
-          void stmtLabel() {
-              string Label = CurrentLabel;
-              if(CurrentLabelOffset > 0) {
-                  Label += "::" + utostr(CurrentLabelOffset);
-              }
-              labelRef(Label, 0);
-              CurrentLabelOffset++;
-          }
-
-          void startStmt(const string &Cmd) {
-              stmtLabel();
-              startList(Cmd);
-          }
-
-          void endStmt(const string &Cmd) {
-              endList(Cmd);
-          }
-
-          void null() {
-              startStmt("null");
-              endStmt("null");
-          }
-
-          void jump(const string &Id, uint64_t Offset = 0, uint64_t Leaving = 0) {
-                startStmt("jump");
-                labelRef(Id, Offset);
-                atom("leaving");
-                atom(Leaving);
-                endStmt("jump");
-          }
-
-
-          // For initializers
           void ref(string Id, uint64_t Offset = 0) {
               startList("ref",true);
               identifier(Id);
@@ -348,25 +300,6 @@ namespace llvm {
               atom(BitsOffset);
               atom(OffsetBits / LeastAddrUnit);
               endList("dec_unsigned");
-          }
-
-          void alloc(string Id, uint64_t Size) {
-              startList("alloc");
-              atom(BitsFRef);
-              identifier(Id);
-              if(Size == ~0ULL) {
-                  atom("inf");
-              } else {
-                  atom(Size);
-              }
-              endList("alloc");
-          }
-
-          void load(unsigned Size, string Fref, uint64_t Offset = 0) {
-              startList("load", true);
-              atom(Size);
-              address(Fref, Offset);
-              endList("load");
           }
 
           void dec_unsigned(unsigned BitWidth, uint64_t Value) {
@@ -409,98 +342,18 @@ namespace llvm {
               atom(buffer);
               endList("float_val");
           }
-    };
 
-    /// Class representing ALF constants (labels, addresses, integers and floats)
-    class ALFConstant {
-    protected:
-        /// type tag
-        ALFType Type;
-        ALFConstant(ALFType type) : Type(type) {}
-    public:
-        virtual ~ALFConstant() {}
-        ALFType getType() const { return Type; }
-        virtual void print(ALFOutput& Out) = 0;
-    };
-
-    class ALFConstInteger : public ALFConstant {
-        unsigned BitWidth;
-        APInt Value;
-    public:
-        virtual ~ALFConstInteger() {}
-        ALFConstInteger(unsigned bitwidth, APInt value) :
-            ALFConstant(ALFInteger),
-            BitWidth(bitwidth),
-            Value(value) {
-        }
-        virtual void print(ALFOutput& Out) {
-            Out.dec_unsigned(BitWidth, Value);
-        }
-        APInt getValue() {
-            return Value;
-        }
-        uint64_t getLimitedValue(uint64_t Limit = ~0ULL) {
-            return Value.getLimitedValue(Limit);
-        }
-        /// Methods for support type inquiry through isa, cast, and dyn_cast:
-        static inline bool classof(const ALFConstInteger *C) { return true; }
-        static inline bool classof(const ALFConstant *C) {
-          return C->getType() == ALFInteger;
-        }
-    };
-
-    class ALFConstFloat : public ALFConstant {
-        unsigned ExpBits, FracBits;
-        APFloat Value;
-    public:
-        virtual ~ALFConstFloat() {}
-        ALFConstFloat(unsigned expBits, unsigned fracBits, APFloat value) :
-            ALFConstant(ALFFloat),
-            ExpBits(expBits), FracBits(fracBits),
-            Value(value) {
-        }
-        virtual void print(ALFOutput& Out) {
-            Out.float_val(ExpBits, FracBits, Value);
-        }
-        /// Methods for support type inquiry through isa, cast, and dyn_cast:
-        static inline bool classof(const ALFConstFloat *C) { return true; }
-        static inline bool classof(const ALFConstant *C) {
-          return C->getType() == ALFFloat;
-        }
-    };
-
-    class ALFConstAddress : public ALFConstant {
-        bool IsCodeAddress;
-        std::string Name;
-        uint64_t Offset;
-    public:
-        virtual ~ALFConstAddress() {}
-        ALFConstAddress(bool isCodeAddress, std::string name, uint64_t offset) :
-            ALFConstant(ALFAddress),
-            IsCodeAddress(isCodeAddress),
-            Name(name), Offset(offset) {
-        }
-        virtual void print(ALFOutput& Out) {
-            if(IsCodeAddress) {
-                Out.labelRef(Name, Offset);
-            } else {
-                Out.address(Name, Offset);
-            }
-        }
-        void addOffset(uint64_t OffsIncrement) {
-            Offset += OffsIncrement;
-        }
-        std::string getFrame() {
-            return Name;
-        }
-        uint64_t getOffset() {
-            return Offset;
-        }
-        /// Methods for support type inquiry through isa, cast, and dyn_cast:
-        static inline bool classof(const ALFConstAddress *C) { return true; }
-        static inline bool classof(const ALFConstant *C) {
-          return C->getType() == ALFAddress;
-        }
+          void alloc(string Id, uint64_t Size) {
+              startList("alloc");
+              atom(BitsFRef);
+              identifier(Id);
+              if(Size == ~0ULL) {
+                  atom("inf");
+              } else {
+                  atom(Size);
+              }
+              endList("alloc");
+          }
     };
 
 }

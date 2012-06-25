@@ -156,7 +156,6 @@ namespace llvm {
 
     /// ALF Builder
     ALFBuilder& Builder;
-    ALFOutput& Output; // XXX: remove me
 
     /// Context for creating expression: either global or current ALF function
     ALFContext *ACtx;
@@ -165,12 +164,12 @@ namespace llvm {
     ALFStatementGroup *CurrentBlock;
 
     /// State for adding statements: current instruction index
-    unsigned CurrentStatementIndex;
+    unsigned CurrentInsIndex;
 
     /// State for generating expressions via visitors
     SExpr* BuiltExpr;
 
-    /// Output Configuration
+    /// Whether volatiles should be ignored
     bool IgnoreVolatiles;
 
     /// Memory Areas
@@ -210,7 +209,6 @@ namespace llvm {
 	explicit ALFTranslator(ALFBuilder &B, unsigned lau, bool FlagIgnoreVolatiles)
       : LeastAddrUnit(lau),
         Builder(B),
-        Output(B.getOutput()),
         IgnoreVolatiles(FlagIgnoreVolatiles),
         NextAnonValueNumber(0),
         TD(0), TCtx(0), TAsm(0), Mang(0)  // initialized in 'initializeTarget
@@ -244,7 +242,7 @@ namespace llvm {
     /// translate a basic block
     void processBasicBlock(const BasicBlock *BBconst, ALFFunction *AF);
 
-    /// emit the signature for a function
+    /// process a function definition sginature
     void processFunctionSignature(const Function *F, ALFFunction *AF);
 
     /// add a statement to the builder
@@ -430,10 +428,10 @@ namespace llvm {
     }
 
     /// Add statements for an unconditional jump
-    void emitUnconditionalJump(BasicBlock* Block, BasicBlock* Succ);
+    void addUnconditionalJump(const Twine& Label, const Twine& Comment, BasicBlock* Block, BasicBlock* Succ);
 
     /// Add statements for a conditional branch or switch instruction
-    void emitSwitch(TerminatorInst& SI, Value* Condition, const CaseVector& Cases, BasicBlock* DefaultCase);
+    void addSwitch(TerminatorInst& SI, Value* Condition, const CaseVector& Cases, BasicBlock* DefaultCase);
 
     /// Build integer atom
     SExpr* buildIntNumVal(const APInt& Value) {
@@ -497,6 +495,10 @@ namespace llvm {
       return bits / LeastAddrUnit;
     }
   private:
+
+    /// Build a comment describing a statement
+    std::string getStatementComment(const Instruction &Ins, unsigned Index);
+
     /// Collect all LLVM instructions combined in the ALF statement for the given instruction
     void getStatementInstructions(const Instruction &Ins, std::vector<const Instruction*> &InsList);
 
