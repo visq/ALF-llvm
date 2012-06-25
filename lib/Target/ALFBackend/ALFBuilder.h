@@ -255,6 +255,101 @@ public:
     }
 };
 
+/// ALF Type
+enum ALFType { ALFInteger, ALFFloat, ALFAddress, ALFLabel };
+
+/// Class representing ALF constants (labels, addresses, integers and floats)
+class ALFConstant {
+protected:
+    /// type tag
+    ALFType Type;
+    ALFConstant(ALFType type) : Type(type) {}
+public:
+    virtual ~ALFConstant() {}
+    ALFType getType() const { return Type; }
+    virtual alf::SExpr* createSExpr(ALFContext *Ctx) = 0;
+};
+
+class ALFConstInteger : public ALFConstant {
+    unsigned BitWidth;
+    APInt Value;
+public:
+    virtual ~ALFConstInteger() {}
+    ALFConstInteger(unsigned bitwidth, APInt value) :
+        ALFConstant(ALFInteger),
+        BitWidth(bitwidth),
+        Value(value) {
+    }
+    virtual SExpr* createSExpr(ALFContext *Ctx) {
+        return Ctx->dec_unsigned(BitWidth,Value.getLimitedValue());
+    }
+    APInt getValue() {
+        return Value;
+    }
+    uint64_t getLimitedValue(uint64_t Limit = ~0ULL) {
+        return Value.getLimitedValue(Limit);
+    }
+    /// Methods for support type inquiry through isa, cast, and dyn_cast:
+    static inline bool classof(const ALFConstInteger *C) { return true; }
+    static inline bool classof(const ALFConstant *C) {
+      return C->getType() == ALFInteger;
+    }
+};
+
+class ALFConstFloat : public ALFConstant {
+    unsigned ExpBits, FracBits;
+    APFloat Value;
+public:
+    virtual ~ALFConstFloat() {}
+    ALFConstFloat(unsigned expBits, unsigned fracBits, APFloat value) :
+        ALFConstant(ALFFloat),
+        ExpBits(expBits), FracBits(fracBits),
+        Value(value) {
+    }
+    virtual SExpr* createSExpr(ALFContext *Ctx) {
+        return Ctx->float_val(ExpBits, FracBits, Value);
+    }
+    /// Methods for support type inquiry through isa, cast, and dyn_cast:
+    static inline bool classof(const ALFConstFloat *C) { return true; }
+    static inline bool classof(const ALFConstant *C) {
+      return C->getType() == ALFFloat;
+    }
+};
+
+class ALFConstAddress : public ALFConstant {
+    bool IsCodeAddress;
+    std::string Name;
+    uint64_t Offset;
+public:
+    virtual ~ALFConstAddress() {}
+    ALFConstAddress(bool isCodeAddress, std::string name, uint64_t offset) :
+        ALFConstant(ALFAddress),
+        IsCodeAddress(isCodeAddress),
+        Name(name), Offset(offset) {
+    }
+    virtual SExpr* createSExpr(ALFContext *Ctx) {
+        if(IsCodeAddress) {
+            return Ctx->labelRef(Name, Offset);
+        } else {
+            return Ctx->address(Name, Offset);
+        }
+    }
+    void addOffset(uint64_t OffsIncrement) {
+        Offset += OffsIncrement;
+    }
+    std::string getFrame() {
+        return Name;
+    }
+    uint64_t getOffset() {
+        return Offset;
+    }
+    /// Methods for support type inquiry through isa, cast, and dyn_cast:
+    static inline bool classof(const ALFConstAddress *C) { return true; }
+    static inline bool classof(const ALFConstant *C) {
+      return C->getType() == ALFAddress;
+    }
+};
+
 } // end namespace alf
 
 #endif

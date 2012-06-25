@@ -13,7 +13,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ALFOutput.h"
 #include "ALFTranslator.h"
 #include "llvm/IntrinsicInst.h"
 #include "llvm/Analysis/DebugInfo.h"
@@ -151,10 +150,10 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
     BasicBlock *BB = const_cast<BasicBlock*>(BBconst);
     CurrentBlock = ACtx->addBasicBlock(getBasicBlockLabel(BB), "Basic Block " + BB->getName());
 
-    // Output all of the instructions in the basic block...
+    // Add statements covering all of the instructions in the basic block...
     unsigned Index = 0;
     for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ++II) {
-        CurrentStatementIndex = Index++;
+        CurrentInsIndex = Index++;
         // Do not emit code for PHI nodes, debug instructions or inlineable instructions
         if (isa<PHINode>(*II) || isa<DbgInfoIntrinsic>(*II), isInlinableInst(*II)) {
             continue;
@@ -164,7 +163,7 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
             // ALF variable. Directly *ACtxter* the store, the value
             // of emitLoad(I) is equivalent to emitExpression(I)
             SExpr *Store = ACtx->store(ACtx->address(getValueName(&*II)), buildExpression(&*II));
-            addStatement(*II, CurrentStatementIndex, Store);
+            addStatement(*II, CurrentInsIndex, Store);
         } else {
             visit(*II);
         }
@@ -174,13 +173,18 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
 
 /// Add the ALF statement for the specified instruction to the current basic group
 void ALFTranslator::addStatement(const Instruction& Ins, unsigned Index, SExpr *Code) {
+    CurrentBlock->addStatement(getInstructionLabel(Ins.getParent(), Index), getStatementComment(Ins, Index), Code);
+}
+
+/// Build a comment describing a statement
+std::string ALFTranslator::getStatementComment(const Instruction &Ins, unsigned Index) {
     std::string Comment = "Statement: " + getInstructionLabel(Ins.getParent(), Index);
     std::vector<const Instruction *> InsList;
     getStatementInstructions(Ins,InsList);
     for(std::vector<const Instruction*>::const_reverse_iterator II = InsList.rbegin(), IE = InsList.rend(); IE != II; ++ II) {
         Comment = Comment + "\n- " + valueToString(**II);
     }
-    CurrentBlock->addStatement(getInstructionLabel(Ins.getParent(), Index), Comment, Code);
+    return Comment;
 }
 
 // Collect all LLVM instructions combined in the ALF statement for the given instruction
@@ -450,7 +454,7 @@ void ALFTranslator::visitReturnInst(ReturnInst &I) {
       Ret->append(buildOperand(I.getOperand(i)));
   }
   assert(! isExpressionInst(I) && "ReturnInst should be a statement, not an expression");
-  addStatement(I,CurrentStatementIndex,Ret);
+  addStatement(I,CurrentInsIndex,Ret);
 }
 
 void ALFTranslator::visitSwitchInst(SwitchInst &SI) {
@@ -464,10 +468,11 @@ void ALFTranslator::visitSwitchInst(SwitchInst &SI) {
 	 	  for(SwitchInst::CaseIt I = SI.case_begin(), E = SI.case_end(); I != E; ++I) {
 	 	      Cases.push_back(make_pair(I.getCaseValue(), I.getCaseSuccessor()));
 	 	  }
-	 	  emitSwitch(SI, Condition, Cases, SI.getDefaultDest());
+	 	  addSwitch(SI, Condition, Cases, SI.getDefaultDest());
 
 	} else { // emulated unconditional branch
-	    emitUnconditionalJump(SI.getParent(), SI.getDefaultDest());
+	    addUnconditionalJump(getInstructionLabel(SI.getParent(),CurrentInsIndex), getStatementComment(SI,CurrentInsIndex),
+	                         SI.getParent(), SI.getDefaultDest());
 	}
 }
 
@@ -481,10 +486,11 @@ void ALFTranslator::visitBranchInst(BranchInst &I) {
         /* one case: true -> 0, default -> 1 */
         ALFTranslator::CaseVector Cases;
         Cases.push_back(make_pair(ConstantInt::getTrue(Condition->getType()), I.getSuccessor(0)));
-        emitSwitch(I, Condition, Cases, I.getSuccessor(1));
+        addSwitch(I, Condition, Cases, I.getSuccessor(1));
 
     } else {
-        emitUnconditionalJump(I.getParent(), I.getSuccessor(0));
+        addUnconditionalJump(getInstructionLabel(I.getParent(),CurrentInsIndex), getStatementComment(I,CurrentInsIndex),
+                             I.getParent(), I.getSuccessor(0));
     }
 }
 
@@ -499,7 +505,7 @@ void ALFTranslator::visitIndirectBrInst(IndirectBrInst &IBI) {
 /// currently emit a nop (which is NOT a good solution IMHO).
 void ALFTranslator::visitUnreachableInst(UnreachableInst &I) {
     assert(! isExpressionInst(I) && "UnreachableInst should be a statement, not an expression");
-    addStatement(I,CurrentStatementIndex,ACtx->null());
+    addStatement(I,CurrentInsIndex,ACtx->null());
 }
 
 /// add statement for StoreInst
@@ -512,7 +518,7 @@ void ALFTranslator::visitStoreInst(StoreInst &I) {
     SExpr *LHS = buildOperand(I.getPointerOperand());
     SExpr *RHS = buildOperand(I.getOperand(0));
     assert(! isExpressionInst(I) && "StoreInst should be a statement, not an expression");
-    addStatement(I,CurrentStatementIndex,ACtx->store(LHS,RHS));
+    addStatement(I,CurrentInsIndex,ACtx->store(LHS,RHS));
 }
 
 
@@ -569,7 +575,7 @@ void ALFTranslator::visitCallInst(CallInst &I) {
     Call->append(ACtx->address(getValueName(&I), 0));
   }
   assert(! isExpressionInst(I) && "CallInst should be a statement, not an expression");
-  addStatement(I, CurrentStatementIndex, Call);
+  addStatement(I, CurrentInsIndex, Call);
 }
 
 /// visitBuiltinCall - Handle the call to the specified builtin.  Returns true
@@ -588,12 +594,12 @@ void ALFTranslator::visitCallInst(CallInst &I) {
 //  ... support for 128-bit integers
 // FIXME: Port to 3.1
 bool ALFTranslator::visitBuiltinCall(CallInst &I, Intrinsic::ID ID) {
-  SExpr *Expr;
   switch(ID) {
+  // do not generate code for dbg_*
   case Intrinsic::dbg_declare:
   case Intrinsic::dbg_value:
       return true;
-  /// mem{cpy,set,move}: For constant length N, emit load/store pairs
+  // mem{cpy,set,move}: For constant length N, emit load/store pairs
   case Intrinsic::memcpy:
   case Intrinsic::memmove:
   case Intrinsic::memset:
@@ -628,7 +634,7 @@ bool ALFTranslator::visitBuiltinCall(CallInst &I, Intrinsic::ID ID) {
 			      Store->append(ACtx->list("load")->append(8)->append(ValueExpr));
 			  }
 		  }
-		  addStatement(I, CurrentStatementIndex, Store);
+		  addStatement(I, CurrentInsIndex, Store);
 		  return true;
 	  }
   case Intrinsic::vastart:
@@ -658,7 +664,7 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
           ->append(buildOperand(I.getTrueValue()))
           ->append(buildOperand(I.getFalseValue()));
 #else
-  Twine InstLabel = getInstructionLabel(I.getParent(), CurrentStatementIndex);
+  Twine InstLabel = getInstructionLabel(I.getParent(), CurrentInsIndex);
   Twine ThenLabel = InstLabel + "::then";
   Twine ElseLabel = InstLabel + "::else";
   Twine JoinLabel = InstLabel + "::join";
@@ -672,7 +678,7 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
         ->append(ThenTarget)
         ->append(ElseTarget);
   assert(! isExpressionInst(I) && "SelectInst should be a a statement (! ENABLE_SELECT_EXPRESSIONS)");
-  addStatement(I,CurrentStatementIndex,Switch);
+  addStatement(I,CurrentInsIndex,Switch);
 
   // then and else branch
   for(int Branch = 0; Branch < 2; Branch++) {
@@ -711,10 +717,11 @@ void ALFTranslator::visitPHINode(PHINode &I) {
     setVisitorResult(I,ACtx->load(getBitWidth(I.getType()), getValueName(&I), 0));
 }
 
-// Emit ALF expression for binary operator
-// FIXME: Support nuw and nsw Semantics
-// FIXME: Is it ok to use u_mul + bitcast to emulate LLVM mul?
-// FIXME: has ALF/mod and LLVM/rem the same semantics?
+/// Emit ALF expression for binary operator
+/// nuw/nsw flags are ignored, as they do not influence the semantics for a correct
+/// program
+/// FIXME: Is it ok to use u_mul + bitcast to emulate LLVM mul?
+/// FIXME: has ALF/mod and LLVM/rem the same semantics?
 void ALFTranslator::visitBinaryOperator(Instruction &I) {
   // binary instructions, shift instructions, setCond instructions.
   assert(!I.getType()->isPointerTy() && "Binary operator for pointer type?");
@@ -792,7 +799,6 @@ void ALFTranslator::visitBinaryOperator(Instruction &I) {
               ->append(buildOperand(Ops[1]))
               ->append(ACtx->dec_unsigned(1,I.getOpcode() == Instruction::Add ? 0 : 1));
     } else if(BinOpType == Mul) {
-        // FIXME: support nuw and nsw
         E = buildMultiplication(BitWidth, I.getOperand(0), I.getOperand(1));
     } else if(BinOpType == DivRem) {
         E = ACtx->list(Cmd)
@@ -1141,16 +1147,15 @@ SExpr* ALFTranslator::buildLoad(Value* Operand) {
     return ACtx->load(getBitWidth(Operand->getType()),getValueName(Operand));
 }
 
-void ALFTranslator::emitUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
+void ALFTranslator::addUnconditionalJump(const Twine& Label, const Twine& Comment, BasicBlock* Block, BasicBlock* Succ) {
     setPHICopiesForSuccessor (Block, Succ);
-    Output.jump(getBasicBlockLabel(Succ));
+    CurrentBlock->addStatement(Label, Comment, ACtx->jump(getBasicBlockLabel(Succ)));
 }
 
 
-
-// Emit switch statement. The phi variables are now set in an extra basic block inserted
+// Add switch statement. The phi variables are now set in an extra basic block inserted
 // between the predecessors and sucessor.
-void ALFTranslator::emitSwitch(TerminatorInst& SI,
+void ALFTranslator::addSwitch(TerminatorInst& SI,
 		                   Value* Condition,
 		                   const CaseVector& Cases,
 		                   BasicBlock* DefaultCase) {
@@ -1158,35 +1163,35 @@ void ALFTranslator::emitSwitch(TerminatorInst& SI,
 	  BasicBlock *BB = SI.getParent();
 
 	  std::set<BasicBlock*> EdgeBlocks;
-	  Output.startStmt("switch");
-	  /*emitOperand()*/(void)buildOperand(Condition);
+	  SExprList *Code = ACtx->list("switch")
+	                        ->append(buildOperand(Condition));
 	  for(CaseVector::const_iterator I = Cases.begin(), E = Cases.end(); I!=E; ++I) {
-		    Output.startList("target");
+	        SExprList *Target = ACtx->list("target")
+	                                ->append(buildOperand(I->first));
 		    /*emitOperand()*/(void)buildOperand(I->first);
 		    if(isa<PHINode>(I->second->begin())) { /* need to set phi variables on the edge */
-				Output.labelRef(getConditionalJumpLabel(BB, I->second));
+		        Target->append(ACtx->labelRef(getConditionalJumpLabel(BB, I->second)));
 				EdgeBlocks.insert(I->second);
 		    } else {
-		    	Output.labelRef(getBasicBlockLabel(I->second));
+                Target->append(ACtx->labelRef(getBasicBlockLabel(I->second)));
 		    }
-		    Output.endList("target");
+		    Code->append(Target);
 	  }
-	  Output.startList("default");
+	  SExprList *DefBranch = ACtx->list("default");
 	  if(isa<PHINode>(DefaultCase->begin())) { /* need to set phi variables on the edge */
-		  Output.labelRef(getConditionalJumpLabel(BB,DefaultCase));
+	      DefBranch->append(ACtx->labelRef(getConditionalJumpLabel(BB,DefaultCase)));
 		  EdgeBlocks.insert(DefaultCase);
 	  } else {
-	      Output.labelRef(getBasicBlockLabel(DefaultCase));
+	      DefBranch->append(ACtx->labelRef(getBasicBlockLabel(DefaultCase)));
 	  }
-	  Output.endList("default");
-	  Output.endStmt("switch");
+	  Code->append(DefBranch);
+	  addStatement(SI, CurrentInsIndex, Code);
 
 	  // Insert basic blocks to set phi copies (one for each succ with phi nodes)
 	  for(std::set<BasicBlock*>::const_iterator I = EdgeBlocks.begin(), E = EdgeBlocks.end();
 			  I!=E; ++I) {
 		  BasicBlock* Succ = *I;
-		  Output.setStmtLabel(getConditionalJumpLabel(BB, Succ));
-		  emitUnconditionalJump(BB, Succ);
+		  addUnconditionalJump(getConditionalJumpLabel(BB, Succ), "Assign to PHI node at edge", BB, Succ);
 	  }
 }
 
@@ -1234,11 +1239,10 @@ SExpr* ALFTranslator::buildConstantExpression(const ConstantExpr* CE) {
 
 	if(FoldedConstant.get() == 0) {
 	    alf_warning("Failed to fold constant expression, emiting undefined: " + valueToString(*CE));
-		Output.undefined(getBitWidth(CE->getType()));
+	    return ACtx->undefined(getBitWidth(CE->getType()));
 	} else {
-		FoldedConstant->print(Output);
+	    return FoldedConstant->createSExpr(ACtx);
 	}
-    return (ACtx->null()/*FIXME*/);
 }
 
 /// Do constant integer and pointer arithmetic.
@@ -1503,8 +1507,6 @@ SExpr* ALFTranslator::buildPointer(Value *Operand, uint64_t Offset) {
 // multiplication result.
 //
 // TODO: is it ok to emulate LLVM multiplication this way?
-//
-// FIXME: support nsw flags etc.
 SExpr* ALFTranslator::buildMultiplication(unsigned ResultBitWidth, Value* Op1, Value* Op2) {
   unsigned BitWidth1 = getBitWidth(Op1->getType());
   unsigned BitWidth2 = getBitWidth(Op2->getType());
