@@ -1,0 +1,16 @@
+Instructions Tests:
+- Terminator: br,switch,indirectbr,ret,unreachable
+- Binary Arithmetic: {,f}{add,sub,mul},{u,s,f}{div,rem}
+- Binary Bitwise: shl,{a,l}shr,and,or,xor,select,
+- Memory Access: alloca,load,store,getelementptr
+- Conversion: {,fp}trunc,{z,s,fp}ext,fpto{ui,si},{ui,si}tofp,ptrtoint,inttoptr,bitcast
+- Comparison: icmp,fcmp
+- PHI: phi
+- Functions: call
+Untested Instructions:
+- Aggregate: {extract,insert}value
+Unsupported Instructions:
+- Vector: {extract,insert}element, shufflevector
+- Exceptions: invoke, resume
+- Memory Access: fence, cmpxchg, atomicrmw
+- Misc.: va_arg, landingpad

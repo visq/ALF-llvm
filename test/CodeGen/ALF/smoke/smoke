@@ -23,7 +23,7 @@ ARGV.each do |file|
 
   compile = "llc -march=alf -alf-standalone -alf-memory-areas=0x00-0xff -o #{f['alf']} #{f}"
   report.puts("<p>Compile <pre>#{compile}</pre></p>")
-  unless system("#{compile} >#{f['llc.log']} 2>&1")
+  unless system("#{compile} >#{f['cclog']} 2>&1")
     puts "Build failed"
     report.print("<p>Failed</p>")
     next
@@ -34,22 +34,32 @@ ARGV.each do |file|
 
   check = "sweet -i=#{f['alf']} -c"
   report.puts("<h2>Abstract Execution</h2><p>Check <pre>#{check}</pre></p>")
-  unless system("#{check} >#{f['sweetc.log']} 2>&1")
+  unless system("#{check} >#{f['checklog']} 2>&1")
     puts "Check failed"
     report.print("<p>Failed</p>")
     next
   end
-  ae = "sweet -i=#{f['alf']} annot=#{f['in']} outannot=#{f['obs']} -ae debug=trace"
+  opts="-i=#{f['alf']}"
+  if File.exist? f['in']
+    opts << " annot=#{f['in']}"
+  else
+    opts << " annot=arg.in"
+  end
+  if File.exist? f['obs']
+    opts << " outannot=#{f['obs']}"
+  end
+  ae = "sweet #{opts} -ae debug=trace"
   report.puts("<p>Abstract Execution<pre>#{ae}</p>")
-  unless system("#{ae} >#{f['sweetae.log']} 2>&1")
-    puts "AE failed #{f['sweetae.log']}"
-    report.puts("<p>Failed:<pre>#{File.readlines(f['sweetae.log'])}</pre></p>")
+  unless system("#{ae} >#{f['aelog']} 2>&1")
+    puts "AE failed #{f['aelog']}"
+    report.puts("<p>Failed:<pre>#{File.readlines(f['aelog'])}</pre></p>")
     next
   end
+  FileUtils.mv('debug_msgs.txt',f['aetrace'])
   if File.exist?(f['out'])
     puts File.readlines(f['out'])
   else
-    puts File.readlines('debug_msgs.txt')[-1]
+    puts File.readlines(f['aetrace'])[-1]
   end
 end
 
