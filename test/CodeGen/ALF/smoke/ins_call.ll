@@ -1,5 +1,5 @@
 ; ModuleID = 'call'
-; simplest possible cal
+; simplest possible call
 
 define i32 @f() {
 entry:
