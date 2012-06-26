@@ -128,7 +128,7 @@ public:
 /// ALF functions
 class ALFFunction : public ALFContext, public ALFLabeled {
     std::string Name;
-    bool IsExported;
+    bool IsExported, IsMultiExit;
     std::vector<Frame*> FormalParameters;
     std::vector<Frame*> LocalVariables;
     std::vector<ALFStatementGroup*> StatementGroups;
@@ -151,8 +151,14 @@ public:
     void setExported(bool isExported = true) {
         IsExported = isExported;
     }
-    bool isExported() {
+    bool isExported() const {
         return IsExported;
+    }
+    void setMultiExit(bool isMultiExit = true) {
+        IsMultiExit = isMultiExit;
+    }
+    bool isMultiExit() const {
+        return IsMultiExit;
     }
     void addFormal(const Twine& Name, unsigned BitWidth) {
         Frame* F = new Frame(Name, BitWidth, ArgFrame);

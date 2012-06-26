@@ -26,6 +26,8 @@
 const string ALFTranslator::NULL_REF("$null");
 const string ALFTranslator::ABS_REF("$mem");
 const string ALFTranslator::ABS_REF_PREFIX("$mem_");
+const string ALFTranslator::RETURN_VALUE_REF("$rv");
+const string ALFTranslator::RETURN_VALUE_LABEL_SUFFIX("$return");
 
 void llvm::alf_fatal_error(const Twine& Reason, Instruction& Ins) {
     DebugLoc Loc = Ins.getDebugLoc();
@@ -72,11 +74,13 @@ void llvm::alf_warning(const Twine& Msg) {
 }
 
 /// Translator Interface
-void ALFTranslator::translateFunction(const Function *F, ALFFunction *ACtx) {
+void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
 
-    this->ACtx = ACtx;
-    processFunctionSignature(F, ACtx);
+    this->ACtx = AF;
+    processFunctionSignature(F, AF);
 
+    // Declare local variables for storing instruction results
+    unsigned ReturnInstructionCount = 0;
     for (const_inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
 
         // We need local variables for:
@@ -84,32 +88,45 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *ACtx) {
         //  - non-inlineable instructions
         //  - The condition of branch and switch statements
         //  - Alloca memory with fixed size
-        const Value* StatementIns = &*I;
-        Twine Reason;
         if(isa<PHINode>(*I)) {
-            Reason     = "Local Variable (PHI node)";
+            AF->addLocal(getValueName(*I), getBitWidth((*I)->getType()), "Local Variable (PHI node)");
         } else if (I->getType() != Type::getVoidTy(F->getContext()) && !isInlinableInst(*I)) {
-            Reason     = "Local Variable (Non-Inlinable Instruction)";
-        } else {
-            StatementIns = 0;
-        }
-        if(StatementIns) {
-            ACtx->addLocal(getValueName(StatementIns), getBitWidth(StatementIns->getType()), Reason);
-        }
-        if (const AllocaInst *AI = isStaticSizeAlloca(&*I)) {
+            AF->addLocal(getValueName(*I), getBitWidth((*I)->getType()), "Local Variable (Non-Inlinable Instruction)");
+        } else if (const AllocaInst *AI = isStaticSizeAlloca(&*I)) {
             const ConstantInt* ArraySize = cast<ConstantInt>(AI->getArraySize());
             Type* ElTy = AI->getType()->getElementType();
-            ACtx->addLocal(getValueName(AI), getBitWidth(ElTy) * ArraySize->getLimitedValue(), "alloca'd memory");
+            AF->addLocal(getValueName(AI), getBitWidth(ElTy) * ArraySize->getLimitedValue(), "alloca'd memory");
+        }
+        // Get information needed for additional locals
+        if(isa<ReturnInst>(*I)) {
+            ReturnInstructionCount++;
         }
     }
-    // We do not need to initialize local variables
+    if(ReturnInstructionCount > 1) {
+        AF->addLocal(RETURN_VALUE_REF, getBitWidth(F->getReturnType()), "return value");
+        AF->setMultiExit(true);
+    } else {
+        AF->setMultiExit(false);
+    }
     // translate the basic blocks
     for (Function::const_iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
-        processBasicBlock(BB, ACtx);
+        processBasicBlock(BB, AF);
     }
-
+    // add return block for multi-exit functions
+    if(AF->isMultiExit()) {
+        CurrentBlock = AF->addBasicBlock(F->getName()+"::"+RETURN_VALUE_LABEL_SUFFIX,"Exit block");
+        SExpr *RetExpr;
+        if(F->getReturnType()->isVoidTy()) {
+            RetExpr = ACtx->ret();
+        } else {
+            RetExpr = ACtx->ret(ACtx->load(getBitWidth(F->getReturnType()), RETURN_VALUE_REF, 0));
+        }
+        CurrentBlock->addStatement(F->getName()+"::"+RETURN_VALUE_LABEL_SUFFIX+"::0", "return statement", RetExpr);
+    }
     // XXX: Support struct returns
     bool isStructReturn = F->hasStructRetAttr();
+
+
     if (isStructReturn) {
         alf_fatal_error("We cannot handle struct returns yet",F);
         // const Type *StructTy =
@@ -148,7 +165,7 @@ void ALFTranslator::processFunctionSignature(const Function *F, ALFFunction *ACt
 // FIXME: BBconst is morally const, but our interfaces do not match
 void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *ACtx) {
     BasicBlock *BB = const_cast<BasicBlock*>(BBconst);
-    CurrentBlock = ACtx->addBasicBlock(getBasicBlockLabel(BB), "Basic Block " + BB->getName());
+    CurrentBlock = ACtx->addBasicBlock(getBasicBlockLabel(BB), BB->getName());
 
     // Add statements covering all of the instructions in the basic block...
     unsigned Index = 0;
@@ -178,11 +195,11 @@ void ALFTranslator::addStatement(const Instruction& Ins, unsigned Index, SExpr *
 
 /// Build a comment describing a statement
 std::string ALFTranslator::getStatementComment(const Instruction &Ins, unsigned Index) {
-    std::string Comment = "Statement: " + getInstructionLabel(Ins.getParent(), Index);
+    std::string Comment = "STATEMENT " + getInstructionLabel(Ins.getParent(), Index);
     std::vector<const Instruction *> InsList;
     getStatementInstructions(Ins,InsList);
     for(std::vector<const Instruction*>::const_reverse_iterator II = InsList.rbegin(), IE = InsList.rend(); IE != II; ++ II) {
-        Comment = Comment + "\n- " + valueToString(**II);
+        Comment = Comment + "\n* " + valueToString(**II);
     }
     return Comment;
 }
@@ -449,12 +466,24 @@ void ALFTranslator::visitReturnInst(ReturnInst &I) {
   if (isStructReturn) {
       alf_fatal_error("struct return not yet supported", I);
   }
-  SExprList* Ret = ACtx->ret();
-  for (unsigned i = 0, e = I.getNumOperands(); i != e; ++i) {
-      Ret->append(buildOperand(I.getOperand(i)));
+  ALFFunction *AF = (ALFFunction*)(ACtx); // in function context
+  if(AF->isMultiExit()) {
+      SExpr *JumpToExit = ACtx->jump(I.getParent()->getParent()->getName() + "::" + RETURN_VALUE_LABEL_SUFFIX);
+      if(I.getNumOperands() != 0) {
+          SExpr *Store = ACtx->store(ACtx->address(RETURN_VALUE_REF),buildOperand(I.getOperand(0)));
+          addStatement(I, CurrentInsIndex, Store);
+          CurrentBlock->addStatement(getInstructionLabel(I.getParent(),CurrentInsIndex)+"::jump","jump to unique exit node", JumpToExit);
+      } else {
+          addStatement(I,CurrentInsIndex,JumpToExit);
+      }
+  } else {
+      SExprList* Ret = ACtx->ret();
+      if(Value* RetVal = I.getReturnValue()) {
+          Ret->append(buildOperand(RetVal));
+      }
+      addStatement(I,CurrentInsIndex,Ret);
   }
   assert(! isExpressionInst(I) && "ReturnInst should be a statement, not an expression");
-  addStatement(I,CurrentInsIndex,Ret);
 }
 
 void ALFTranslator::visitSwitchInst(SwitchInst &SI) {
@@ -533,7 +562,7 @@ void ALFTranslator::visitCallInst(CallInst &I) {
       if (visitBuiltinCall(I, ID))
         return;
 
-  // FIXME: struct returns are not supported yet
+  // Struct returns: FIXME: struct returns are not supported yet
   if (I.hasStructRetAttr()) {
       alf_fatal_error("struct return is not supported yet",I);
   }

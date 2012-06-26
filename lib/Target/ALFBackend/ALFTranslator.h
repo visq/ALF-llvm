@@ -203,6 +203,12 @@ namespace llvm {
 	/// Prefix for frame name of frames addressed using absolute addresses
 	const static string ABS_REF_PREFIX;
 
+	/// Suffix for return value label
+    const static string RETURN_VALUE_LABEL_SUFFIX;
+
+    /// Name of the frame used to store temporary return values
+	const static string RETURN_VALUE_REF;
+
 	/// Type of (case,target) list for switch instructions
 	typedef SmallVector< std::pair<Value*, BasicBlock*> , 32> CaseVector;
 
