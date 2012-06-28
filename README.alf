@@ -11,9 +11,9 @@ This document explains how to
  * build it
  * use it
 
-Tested on 32-bit OSX 10.5 and 64-bit Linux (Ubuntu 10.11)
+Tested on OS X 10.7 and 32-bit Linux (Ubuntu 12.04)
 
-__IMPORTANT NOTE__: We are currently developing against LLVM 3.0
+__IMPORTANT NOTE__: We are currently developing against LLVM 3.1
 
 Getting It
 ----------
@@ -44,7 +44,7 @@ You need git (the version control system).
     git fetch forge
 
     # [llvm/] checkout the alf branch from forge
-    git checkout remotes/forge/alf_release_30 -b alf_release_30
+    git checkout remotes/forge/alf_release_31 -b alf_release_31
 
     # [llvm/] clone clang (C/C++ frontend)
     cd tools
@@ -52,7 +52,7 @@ You need git (the version control system).
     cd clang
 
     # [llvm/tools/clang/] synchronize with the llvm version (currently: release 3.0)
-    git checkout remotes/origin/release_30 -b release_30
+    git checkout remotes/origin/release_31 -b release_31
     cd ../..
 
 _NOTE_: Currently there is no master branch in the otap-llvm repository.
