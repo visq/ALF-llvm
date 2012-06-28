@@ -17,40 +17,40 @@ bb:
   %zd = alloca double, align 8
   %n1d = alloca double, align 8
   call void @llvm.dbg.declare(metadata !{float* %zf}, metadata !16), !dbg !19
-  volatile store float 0.000000e+00, float* %zf, align 4, !dbg !20
+  store volatile float 0.000000e+00, float* %zf, align 4, !dbg !20
   call void @llvm.dbg.declare(metadata !{float* %n1f}, metadata !21), !dbg !22
-  volatile store float 0.000000e+00, float* %n1f, align 4, !dbg !20
+  store volatile float 0.000000e+00, float* %n1f, align 4, !dbg !20
   call void @llvm.dbg.declare(metadata !{double* %zd}, metadata !23), !dbg !25
-  volatile store double 0.000000e+00, double* %zd, align 8, !dbg !26
+  store volatile double 0.000000e+00, double* %zd, align 8, !dbg !26
   call void @llvm.dbg.declare(metadata !{double* %n1d}, metadata !27), !dbg !28
-  volatile store double 0.000000e+00, double* %n1d, align 8, !dbg !26
-  %tmp = volatile load i32* @in, align 4, !dbg !29
+  store volatile double 0.000000e+00, double* %n1d, align 8, !dbg !26
+  %tmp = load volatile i32* @in, align 4, !dbg !29
   %tmp1 = icmp eq i32 %tmp, 0, !dbg !29
   br i1 %tmp1, label %bb8, label %bb2, !dbg !29
 
 bb2:                                              ; preds = %bb
-  %tmp3 = volatile load float* %zf, align 4, !dbg !30
+  %tmp3 = load volatile float* %zf, align 4, !dbg !30
   %tmp4 = fpext float %tmp3 to double, !dbg !30
-  %tmp5 = volatile load double* %zd, align 8, !dbg !30
+  %tmp5 = load volatile double* %zd, align 8, !dbg !30
   %tmp6 = fdiv double %tmp4, %tmp5, !dbg !30
-  volatile store double %tmp6, double* %n1d, align 8, !dbg !30
+  store volatile double %tmp6, double* %n1d, align 8, !dbg !30
   %tmp7 = fptrunc double %tmp6 to float, !dbg !30
-  volatile store float %tmp7, float* %n1f, align 4, !dbg !30
+  store volatile float %tmp7, float* %n1f, align 4, !dbg !30
   br label %bb14, !dbg !32
 
 bb8:                                              ; preds = %bb
-  %tmp9 = volatile load double* %zd, align 8, !dbg !33
-  %tmp10 = volatile load float* %zf, align 4, !dbg !33
+  %tmp9 = load volatile double* %zd, align 8, !dbg !33
+  %tmp10 = load volatile float* %zf, align 4, !dbg !33
   %tmp11 = fpext float %tmp10 to double, !dbg !33
   %tmp12 = fdiv double %tmp9, %tmp11, !dbg !33
-  volatile store double %tmp12, double* %n1d, align 8, !dbg !33
+  store volatile double %tmp12, double* %n1d, align 8, !dbg !33
   %tmp13 = fptrunc double %tmp12 to float, !dbg !33
-  volatile store float %tmp13, float* %n1f, align 4, !dbg !33
+  store volatile float %tmp13, float* %n1f, align 4, !dbg !33
   br label %bb14, !dbg !35
 
 bb14:                                             ; preds = %bb8, %bb2
   call void @llvm.dbg.value(metadata !36, i64 0, metadata !37), !dbg !38
-  %tmp15 = volatile load double* %n1d, align 8, !dbg !39
+  %tmp15 = load volatile double* %n1d, align 8, !dbg !39
   %tmp16 = load float* @nan_f, align 4, !dbg !39
   %tmp17 = fpext float %tmp16 to double, !dbg !39
   %tmp18 = fcmp olt double %tmp15, %tmp17, !dbg !39
@@ -62,7 +62,7 @@ bb19:                                             ; preds = %bb14
 
 bb20:                                             ; preds = %bb19, %bb14
   %r.0 = phi i32 [ 1, %bb19 ], [ 0, %bb14 ]
-  %tmp21 = volatile load double* %n1d, align 8, !dbg !41
+  %tmp21 = load volatile double* %n1d, align 8, !dbg !41
   %tmp22 = load double* @nand, align 8, !dbg !41
   %tmp23 = fcmp ogt double %tmp21, %tmp22, !dbg !41
   br i1 %tmp23, label %bb24, label %bb26, !dbg !41
@@ -74,7 +74,7 @@ bb24:                                             ; preds = %bb20
 
 bb26:                                             ; preds = %bb24, %bb20
   %r.1 = phi i32 [ %tmp25, %bb24 ], [ %r.0, %bb20 ]
-  %tmp27 = volatile load double* %n1d, align 8, !dbg !42
+  %tmp27 = load volatile double* %n1d, align 8, !dbg !42
   %tmp28 = load double* @pinfd, align 8, !dbg !42
   %tmp29 = fcmp ult double %tmp27, %tmp28, !dbg !42
   br i1 %tmp29, label %bb32, label %bb30, !dbg !42
@@ -86,7 +86,7 @@ bb30:                                             ; preds = %bb26
 
 bb32:                                             ; preds = %bb30, %bb26
   %r.2 = phi i32 [ %tmp31, %bb30 ], [ %r.1, %bb26 ]
-  %tmp33 = volatile load float* %n1f, align 4, !dbg !43
+  %tmp33 = load volatile float* %n1f, align 4, !dbg !43
   %tmp34 = fpext float %tmp33 to double, !dbg !43
   %tmp35 = load double* @ninfd, align 8, !dbg !43
   %tmp36 = fcmp ugt double %tmp34, %tmp35, !dbg !43

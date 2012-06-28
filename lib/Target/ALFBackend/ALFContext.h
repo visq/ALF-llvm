@@ -9,6 +9,14 @@
 #ifndef __ALF_CONTEXT_H__
 #define __ALF_CONTEXT_H__
 
+#include <iostream>
+#include <vector>
+#include "llvm/Type.h"
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/Twine.h"
+
 #include "SExpr.h"
 
 namespace alf {
@@ -115,16 +123,16 @@ public:
     // FIXME: should be StringRef
     SExpr* address(const Twine& Name, uint64_t OffsetInBits = 0) {
         return list("addr")->append(Config->getBitsFRef())
-                            ->append(fref(Name))
+                            ->append(fref(Twine(Name)))
                             ->append(offset(OffsetInBits));
     }
     SExpr* fref(const Twine& Name) {
         return list("fref")->append(Config->getBitsFRef())
-                            ->append(identifier(Name));
+                            ->append(identifier(Twine(Name)));
     }
     SExpr* lref(const Twine& Name) {
         return list("lref")->append(Config->getBitsLRef())
-                            ->append(identifier(Name));
+                            ->append(identifier(Twine(Name)));
     }
     // Offset of Address or Label
     // Parameter is in Bits, and converted to LAU
@@ -142,7 +150,20 @@ public:
                 ->append("leaving")
                 ->append(Leaving);
     }
-    // expression and statement construction
+    SExpr* add(unsigned BitWidth, SExpr *Op1, SExpr *Op2, uint8_t Carry = 0) {
+        return list("add")
+                ->append(BitWidth)
+                ->append(Op1)
+                ->append(Op2)
+                ->append(dec_unsigned(1,Carry));
+    }
+    SExpr* sub(unsigned BitWidth, SExpr *Op1, SExpr *Op2, uint8_t Carry = 1) {
+        return list("sub")
+                ->append(BitWidth)
+                ->append(Op1)
+                ->append(Op2)
+                ->append(dec_unsigned(1,Carry));
+    }
     SExpr* load(unsigned BitWidth, SExpr* ref) {
         return list("load")->append(BitWidth)->append(ref);
     }
@@ -163,7 +184,7 @@ public:
     }
     SExpr* labelRef(const Twine& Id, unsigned Offset = 0) {
         return list("label")->append(Config->getBitsLRef())
-                             ->append(lref(Id))
+                             ->append(lref(Twine(Id)))
                              ->append(offset(Offset));
     }
 };

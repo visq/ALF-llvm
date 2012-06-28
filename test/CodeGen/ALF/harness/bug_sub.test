@@ -1,4 +1,4 @@
 M=bug_sub
-TIMEOUT=1
+TIMEOUT=60
 source libtest
 sweet_css || die "sweet single-path execution timeout (or failure)"

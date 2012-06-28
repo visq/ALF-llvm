@@ -9,13 +9,13 @@ target triple = "i386-pc-linux-gnu"
 
 define signext i8 @nondet_i8() nounwind {
   %1 = load i8** @i8_ptr, align 4
-  %2 = volatile load i8* %1, align 1
+  %2 = load volatile i8* %1, align 1
   ret i8 %2
 }
 
 define i32 @nondet_u32(i32 %lb, i32 %ub) nounwind {
   %1 = load i32** @u32_ptr, align 4
-  %2 = volatile load i32* %1, align 4
+  %2 = load volatile i32* %1, align 4
   %3 = icmp ult i32 %2, %lb
 
   br i1 %3, label %bb.v0a, label %bb.v0b

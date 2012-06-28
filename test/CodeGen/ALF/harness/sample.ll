@@ -61,7 +61,7 @@ bb1:                                              ; preds = %bb9, %bb
 bb2:                                              ; preds = %bb1
   %tmp3 = getelementptr inbounds [3 x i64]* @seeds, i32 0, i32 %i.0, !dbg !70
   %tmp4 = load i64* %tmp3, align 4, !dbg !70
-  %tmp5 = volatile load i32* @input, align 4, !dbg !70
+  %tmp5 = load volatile i32* @input, align 4, !dbg !70
   %tmp6 = sext i32 %tmp5 to i64, !dbg !70
   %tmp7 = mul nsw i64 %tmp4, %tmp6, !dbg !70
   %tmp8 = getelementptr inbounds [3 x i64]* @oseeds, i32 0, i32 %i.0, !dbg !70
@@ -74,7 +74,7 @@ bb9:                                              ; preds = %bb2
   br label %bb1, !dbg !74
 
 bb11:                                             ; preds = %bb1
-  %tmp12 = volatile load i32* @input, align 4, !dbg !75
+  %tmp12 = load volatile i32* @input, align 4, !dbg !75
   %tmp13 = sext i32 %tmp12 to i64, !dbg !75
   %tmp14 = load i64* getelementptr inbounds ([3 x i64]* @oseeds, i32 0, i32 1), align 4, !dbg !75
   %tmp15 = lshr i64 %tmp14, 8

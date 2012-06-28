@@ -173,9 +173,6 @@ namespace {
     /// translated module
     const Module *TheModule;
 
-    /// types used for volatile loads
-    SmallPtrSet<Type*,16> VolatileTypes;
-
     /// Loop Info
     LoopInfo *LI;
 
@@ -306,10 +303,7 @@ void ALFBackend::processFunctionImports(Module &M) {
             if(!ALFStandalone) {
                 std::string Label = Translator.getValueName(I);
                 Builder.importLabel(Label);
-            } else {
-                // Add volatile storage for return values of undefined function stubs
-                VolatileTypes.insert(I->getReturnType());
-            }
+            } // otherwise: add stub
         }
     }
 }
@@ -356,39 +350,6 @@ void ALFBackend::processGlobalVariables(Module &M) {
         }
     }
 
-    // Collect volatile memory loads
-    std::map<std::string, unsigned> VolatileStorage;
-    for(Module::iterator If = M.begin(), Ef = M.end(); If != Ef; ++If) {
-        for(Function::iterator Ib = *If->begin(), Eb = *If->end(); Ib != Eb; ++Ib) {
-            for(BasicBlock::iterator Ii = *Ib->begin(), Ei = *Ib->end(); Ii != Ei; ++Ii) {
-                // Inspect all volatile loads
-                if(const LoadInst* LIns = dyn_cast<LoadInst>(&*Ii)) {
-                    if(LIns->isVolatile()) {
-                        Type *VTy = LIns->getType();
-                        VolatileTypes.insert(VTy);
-                        VolatileStorage.insert(make_pair(Translator.getVolatileStorage(VTy), Translator.getBitWidth(VTy)));
-                    }
-                }
-            }
-        }
-    }
-
-    // Add volatile variables
-    for(std::map<std::string, unsigned>::iterator I = VolatileStorage.begin(), E= VolatileStorage.end(); I!=E; ++I) {
-        Builder.addFrame(I->first, I->second, InternalFrame);
-        bool Volatile = true;
-        SExpr *Zero;
-        uint64_t Repeats;
-        /* Initialize with 0-values in chunks of size LAU */
-        if(I->second < LeastAddrUnit) {
-            Zero = Builder.dec_unsigned(I->second, 0);
-            Repeats = 1;
-        } else {
-            Zero = Builder.dec_unsigned(LeastAddrUnit, 0);
-            Repeats = I->second / LeastAddrUnit;
-        }
-        Builder.addInit(I->first, 0, Builder.const_repeat(Zero, Repeats), Volatile);
-    }
 }
 
 
@@ -401,6 +362,7 @@ void ALFBackend::addBuiltinFunctions(Module &M) {
             // TODO Linkage / LLVM_ASM (name starts with 1)
             if(! F->isDeclaration() || F->isIntrinsic()) continue;
             ALFFunction *AF = Builder.addFunction(F->getName(), Translator.getValueName(F), "STUB for undefined function " + F->getName());
+            Translator.processFunctionSignature(F, AF);
             Type *RTy = F->getReturnType();
             SExpr *Z = Builder.load(Translator.getBitWidth(RTy), Builder.address(Translator.getVolatileStorage(RTy)));
             ALFStatementGroup* Block = AF->addBasicBlock(F->getName() + "::entry", "Generated Basic Block (return undef)");
@@ -435,14 +397,20 @@ void ALFBackend::visitFunction(Function &F) {
 }
 
 bool ALFBackend::doFinalization(Module &M) {
-  Builder.writeToFile(Output);
-  // Free memory...
-  delete IL;
-  delete TD;
-  delete Mang;
-  delete TCtx;
-  delete TAsm;
-  return false;
+
+    // Translator finalization
+    Translator.addVolatileFrames();
+
+    // Write
+    Builder.writeToFile(Output);
+
+    // Free memory...
+    delete IL;
+    delete TD;
+    delete Mang;
+    delete TCtx;
+    delete TAsm;
+    return false;
 }
 
 

@@ -40,19 +40,19 @@ bb:
   call void @llvm.dbg.value(metadata !38, i64 0, metadata !39), !dbg !40
   call void @llvm.dbg.value(metadata !41, i64 0, metadata !42), !dbg !43
   call void @llvm.dbg.value(metadata !44, i64 0, metadata !45), !dbg !46
-  %tmp1 = volatile load i32* @select, align 4, !dbg !47
+  %tmp1 = load volatile i32* @select, align 4, !dbg !47
   %tmp2 = srem i32 %tmp1, 3, !dbg !47
   %tmp3 = getelementptr inbounds [3 x i16 (i16)*]* %fs, i32 0, i32 %tmp2, !dbg !47
   %tmp4 = load i16 (i16)** %tmp3, align 4, !dbg !47
   %tmp5 = call signext i16 %tmp4(i16 signext 0) nounwind, !dbg !47
   call void @llvm.dbg.value(metadata !{i16 %tmp5}, i64 0, metadata !48), !dbg !47
-  %tmp6 = volatile load i32* @select, align 4, !dbg !49
+  %tmp6 = load volatile i32* @select, align 4, !dbg !49
   %tmp7 = srem i32 %tmp6, 3, !dbg !49
   %tmp8 = getelementptr inbounds [3 x i16 (i16)*]* %fs, i32 0, i32 %tmp7, !dbg !49
   %tmp9 = load i16 (i16)** %tmp8, align 4, !dbg !49
   %tmp10 = call signext i16 %tmp9(i16 signext 3) nounwind, !dbg !49
   call void @llvm.dbg.value(metadata !{i16 %tmp10}, i64 0, metadata !50), !dbg !49
-  %tmp11 = volatile load i32* @select, align 4, !dbg !51
+  %tmp11 = load volatile i32* @select, align 4, !dbg !51
   %tmp12 = srem i32 %tmp11, 3, !dbg !51
   %tmp13 = getelementptr inbounds [3 x i16 (i16)*]* %fs, i32 0, i32 %tmp12, !dbg !51
   %tmp14 = load i16 (i16)** %tmp13, align 4, !dbg !51

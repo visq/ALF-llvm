@@ -62,11 +62,7 @@ void llvm::alf_fatal_error(const Twine& Reason, const Type& Ty) {
 }
 
 void llvm::alf_fatal_error(const Twine& Reason, const Function* F) {
-    Twine ContextStr;
-    if(F) {
-       ContextStr = " in Function " + F->getName();
-    }
-    report_fatal_error("[llvm2alf] Error: " + Reason + ContextStr);
+    report_fatal_error("[llvm2alf] Error: " + Reason + (F?" in Function "+F->getName():""));
 }
 
 void llvm::alf_warning(const Twine& Msg) {
@@ -77,6 +73,8 @@ void llvm::alf_warning(const Twine& Msg) {
 void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
 
     this->ACtx = AF;
+
+    // add arguments
     processFunctionSignature(F, AF);
 
     // Declare local variables for storing instruction results
@@ -89,25 +87,29 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
         //  - The condition of branch and switch statements
         //  - Alloca memory with fixed size
         if(isa<PHINode>(*I)) {
-            AF->addLocal(getValueName(*I), getBitWidth((*I)->getType()), "Local Variable (PHI node)");
+            AF->addLocal(getValueName(&*I), getBitWidth(I->getType()), "Local Variable (PHI node)");
         } else if (I->getType() != Type::getVoidTy(F->getContext()) && !isInlinableInst(*I)) {
-            AF->addLocal(getValueName(*I), getBitWidth((*I)->getType()), "Local Variable (Non-Inlinable Instruction)");
+            AF->addLocal(getValueName(&*I), getBitWidth(I->getType()), "Local Variable (Non-Inlinable Instruction)");
         } else if (const AllocaInst *AI = isStaticSizeAlloca(&*I)) {
             const ConstantInt* ArraySize = cast<ConstantInt>(AI->getArraySize());
             Type* ElTy = AI->getType()->getElementType();
             AF->addLocal(getValueName(AI), getBitWidth(ElTy) * ArraySize->getLimitedValue(), "alloca'd memory");
         }
+
         // Get information needed for additional locals
         if(isa<ReturnInst>(*I)) {
             ReturnInstructionCount++;
         }
     }
+
+    // add (unique, additional) exit basic block if necessary
     if(ReturnInstructionCount > 1) {
         AF->addLocal(RETURN_VALUE_REF, getBitWidth(F->getReturnType()), "return value");
         AF->setMultiExit(true);
     } else {
         AF->setMultiExit(false);
     }
+
     // translate the basic blocks
     for (Function::const_iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
         processBasicBlock(BB, AF);
@@ -139,10 +141,31 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
     }
 }
 
+// finalize build (call before writing output)
+void ALFTranslator::addVolatileFrames()
+{
+    // Add volatile variables
+    for(std::map<std::string, unsigned>::iterator I = VolatileStorage.begin(), E= VolatileStorage.end(); I!=E; ++I) {
+        Builder.addFrame(I->first, I->second, InternalFrame);
+        bool Volatile = true;
+        SExpr *Zero;
+        uint64_t Repeats;
+        /* Initialize with 0-values in chunks of size LAU */
+        if(I->second < LeastAddrUnit) {
+            Zero = Builder.dec_unsigned(I->second, 0);
+            Repeats = 1;
+        } else {
+            Zero = Builder.dec_unsigned(LeastAddrUnit, 0);
+            Repeats = I->second / LeastAddrUnit;
+        }
+        Builder.addInit(I->first, 0, Builder.const_repeat(Zero, Repeats), Volatile);
+    }
+}
+
 // emit function signature {func LABEL ARG_DECLS SCOPE}
 // FIXME: Ignoring calling conventions and linkage
 // FIXME: We do not support varargs
-void ALFTranslator::processFunctionSignature(const Function *F, ALFFunction *ACtx) {
+void ALFTranslator::processFunctionSignature(const Function *F, ALFFunction *AF) {
 
     // Loop over the arguments, printing them...
     const FunctionType *FT = cast<FunctionType>(F->getFunctionType());
@@ -157,7 +180,7 @@ void ALFTranslator::processFunctionSignature(const Function *F, ALFFunction *ACt
             if (PAL.paramHasAttr(Idx, Attribute::ByVal)) {
                 alf_warning("Attribute::ByVal ignored" + typeToString(*FT));
             }
-            ACtx->addFormal(getValueName(I), getBitWidth(I->getType()));
+            AF->addFormal(getValueName(I), getBitWidth(I->getType()));
             ++Idx;
         }
     }
@@ -282,13 +305,13 @@ void ALFTranslator::addInitializers(Module &M, GlobalVariable& V, unsigned BitOf
 			}
 			for(unsigned Ix = 0; Ix < NumElems; Ix++) {
 				Constant* SubConstZero = Constant::getNullValue(SeqTy->getElementType());
-				addInitializers(M, V, BitOffset + getBitOffset(SeqTy, Ix), SubConstZero);
+				addInitializers(M, V, BitOffset + (uint64_t)getBitOffset(SeqTy, Ix), SubConstZero);
 			}
 		} else if(StructType *StructTy = dyn_cast<StructType>(Ty)) {
 			unsigned Ix = 0;
 			for(StructType::element_iterator I = StructTy->element_begin(), E = StructTy->element_end(); I!=E; ++I) {
 				Constant* SubConstZero = Constant::getNullValue(*I);
-				addInitializers(M,V,BitOffset + getBitOffset(StructTy, Ix++), SubConstZero);
+				addInitializers(M,V,BitOffset + (uint64_t)getBitOffset(StructTy, Ix++), SubConstZero);
 			}
 		} else {
 		    alf_fatal_error("addInitializers(): Unknown composite type for ConstantAggregateZero:", *Ty);
@@ -368,13 +391,34 @@ void ALFTranslator::addInitializers(Module &M, GlobalVariable& V, unsigned BitOf
     assert(0 && "llvm_unreachable");
 }
 
-template<typename Tc>
-void ALFTranslator::addCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Tc* Const) {
+void ALFTranslator::addCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantArray* Const) {
 
    	unsigned bitIndex = BitOffset;
     for(ConstantArray::const_op_iterator I = Const->op_begin(), E = Const->op_end();
     I!=E; ++I) {
         Constant *ElConst = cast<Constant>(&*I);
+        addInitializers(M, V, bitIndex, ElConst);
+        bitIndex += TD->getTypeAllocSizeInBits(ElConst->getType());
+    }
+}
+
+void ALFTranslator::addCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantVector* Const) {
+
+    unsigned bitIndex = BitOffset;
+    for(ConstantVector::const_op_iterator I = Const->op_begin(), E = Const->op_end();
+    I!=E; ++I) {
+        Constant *ElConst = cast<Constant>(&*I);
+        addInitializers(M, V, bitIndex, ElConst);
+        bitIndex += TD->getTypeAllocSizeInBits(ElConst->getType());
+    }
+}
+
+
+void ALFTranslator::addCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantDataSequential* Const) {
+
+    unsigned bitIndex = BitOffset;
+    for(unsigned I = 0, E = Const->getNumElements(); I!=E; ++I) {
+        Constant *ElConst = Const->getElementAsConstant(I);
         addInitializers(M, V, bitIndex, ElConst);
         bitIndex += TD->getTypeAllocSizeInBits(ElConst->getType());
     }
@@ -641,12 +685,8 @@ bool ALFTranslator::visitBuiltinCall(CallInst &I, Intrinsic::ID ID) {
 		  Value *Src = I.getOperand(1);
 		  SExprList *Store = ACtx->list("store");
 		  for(uint64_t I = 0, E = Len->getLimitedValue(); I!=E; ++I) {
-		      SExpr *OffsetExpr = ACtx->dec_unsigned(TD->getTypeSizeInBits(Dst->getType()), bitsToLAU(I*8));
-		      SExpr *AddrExpr = ACtx->list("add")
-		                            ->append(TD->getTypeSizeInBits(Dst->getType()))
-		                            ->append(buildExpression(Dst))
-		                            ->append(OffsetExpr)
-		                            ->append(ACtx->dec_unsigned(1,0));
+		      SExpr *OffsetExpr = ACtx->dec_unsigned(getBitWidth(Dst->getType()), bitsToLAU(I*8));
+		      SExpr *AddrExpr = ACtx->add(getBitWidth(Dst->getType()), buildExpression(Dst), OffsetExpr);
 		      Store->append(AddrExpr);
 		  }
 		  Store->append("with");
@@ -654,12 +694,8 @@ bool ALFTranslator::visitBuiltinCall(CallInst &I, Intrinsic::ID ID) {
 			  if(ID == Intrinsic::memset) {
 			      Store->append(buildExpression(Src));
 			  } else {
-	              SExpr *OffsetExpr = ACtx->dec_unsigned(TD->getTypeSizeInBits(Src->getType()), bitsToLAU(I*8));
-			      SExpr *ValueExpr = ACtx->list("add")
-                                         ->append(TD->getTypeSizeInBits(Src->getType()))
-                                         ->append(buildExpression(Src))
-                                          ->append(OffsetExpr)
-                                         ->append(ACtx->dec_unsigned(1,0));
+	              SExpr *OffsetExpr = ACtx->dec_unsigned(getBitWidth(Src->getType()), bitsToLAU(I*8));
+			      SExpr *ValueExpr = ACtx->add(getBitWidth(Src->getType()), buildExpression(Src), OffsetExpr);
 			      Store->append(ACtx->list("load")->append(8)->append(ValueExpr));
 			  }
 		  }
@@ -693,10 +729,10 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
           ->append(buildOperand(I.getTrueValue()))
           ->append(buildOperand(I.getFalseValue()));
 #else
-  Twine InstLabel = getInstructionLabel(I.getParent(), CurrentInsIndex);
-  Twine ThenLabel = InstLabel + "::then";
-  Twine ElseLabel = InstLabel + "::else";
-  Twine JoinLabel = InstLabel + "::join";
+  std::string InstLabel = getInstructionLabel(I.getParent(), CurrentInsIndex);
+  std::string ThenLabel = InstLabel + "::then";
+  std::string ElseLabel = InstLabel + "::else";
+  std::string JoinLabel = InstLabel + "::join";
 
   SExprList *Switch = ACtx->list("switch");
   SExpr *Cond = buildOperand(I.getCondition());
@@ -712,7 +748,7 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
   // then and else branch
   for(int Branch = 0; Branch < 2; Branch++) {
       // store true/false value
-      Twine& Label = Branch == 0 ? ThenLabel : ElseLabel;
+      std::string Label = Branch == 0 ? ThenLabel : ElseLabel;
       SExpr *Val = buildOperand((Branch == 0) ? I.getTrueValue() : I.getFalseValue());
       SExpr *Store = ACtx->store(ACtx->address(getValueName(&I)),Val);
       CurrentBlock->addStatement(Label, "", Store);
@@ -822,11 +858,12 @@ void ALFTranslator::visitBinaryOperator(Instruction &I) {
             	IsPointerOperand[OpIx] = true;
             }
         }
+        unsigned Carry = (I.getOpcode() == Instruction::Add) ? 0 : 1;
         E = ACtx->list(Cmd)
               ->append(BitWidth)
               ->append(buildOperand(Ops[0]))
               ->append(buildOperand(Ops[1]))
-              ->append(ACtx->dec_unsigned(1,I.getOpcode() == Instruction::Add ? 0 : 1));
+              ->append(ACtx->dec_unsigned(1,Carry));
     } else if(BinOpType == Mul) {
         E = buildMultiplication(BitWidth, I.getOperand(0), I.getOperand(1));
     } else if(BinOpType == DivRem) {
@@ -948,7 +985,7 @@ void ALFTranslator::visitGetElementPtrInst(GetElementPtrInst &GepIns) {
 	unsigned BitWidth =  getBitWidth(Ptr->getType());
 	assert(BitWidth == TD->getPointerSizeInBits() && "bad pointer bit width");
 
-	SmallVector<std::pair<Value*, uint64_t>, 4> Offsets;
+	SmallVector<std::pair<Value*, int64_t>, 4> Offsets;
 
     // Pointer arithmetic
     for (gep_type_iterator I = S; I != E; ++I) {
@@ -1012,7 +1049,7 @@ void ALFTranslator::visitExtractValueInst(ExtractValueInst &EVI) {
         Type *OpTy = EVI.getAggregateOperand()->getType();
         for (ExtractValueInst::idx_iterator I = EVI.idx_begin(), E = EVI.idx_end(); I!=E; ++I) {
             CompositeType *Agg = cast<CompositeType>(OpTy);
-            BitOffset += getBitOffset(Agg, *I);
+            BitOffset += (uint64_t)getBitOffset(Agg, *I);
             OpTy = Agg->getTypeAtIndex(*I);
         }
     }
@@ -1177,8 +1214,26 @@ SExpr* ALFTranslator::buildLoad(Value* Operand) {
 }
 
 void ALFTranslator::addUnconditionalJump(const Twine& Label, const Twine& Comment, BasicBlock* Block, BasicBlock* Succ) {
-    setPHICopiesForSuccessor (Block, Succ);
-    CurrentBlock->addStatement(Label, Comment, ACtx->jump(getBasicBlockLabel(Succ)));
+    // Assign to the variables which are defined as PHI nodes
+    // in a direct successor of the current basic block.
+    // Note:   If we set the PHI copy in the direct successor,
+    //         there is no conflict when setting the phi copies for
+    //         all successors in the current basic block. It might
+    //         be more efficient to user intermediate BBs though.
+    // CAVEAT: The branch condition has to be saved to a temporary
+    //         variable BEFORE the successors are set.
+    unsigned Ix = 0;
+    for (BasicBlock::iterator I = Succ->begin(); isa<PHINode>(I); ++I, ++Ix) {
+        PHINode *PN = cast<PHINode>(I);
+        Value *IV = PN->getIncomingValueForBlock(Block);
+        if (!isa<UndefValue>(IV)) {
+            SExpr* Code = ACtx->store(ACtx->address(getValueName(I)),buildOperand(IV));
+            CurrentBlock->addStatement(Twine(Label) + (Ix ? utostr(Ix) : ""),
+                                       "Set PHI node: " + valueToString(*PN) + " to " + valueToString(*IV),
+                                       Code);
+        }
+    }
+    CurrentBlock->addStatement(Twine(Label) + "::jump", Comment, ACtx->jump(getBasicBlockLabel(Succ)));
 }
 
 
@@ -1222,31 +1277,6 @@ void ALFTranslator::addSwitch(TerminatorInst& SI,
 		  BasicBlock* Succ = *I;
 		  addUnconditionalJump(getConditionalJumpLabel(BB, Succ), "Assign to PHI node at edge", BB, Succ);
 	  }
-}
-
-
-// Assign to the variables which are defined as PHI nodes
-// in a direct successor of the current basic block.
-// Note:   If we set the PHI copy in the direct successor,
-//         there is no conflict when setting the phi copies for
-//         all successors in the current basic block. It might
-//         be more efficient to user intermediate BBs though.
-// CAVEAT: The branch condition has to be saved to a temporary
-//         variable BEFORE the successors are set.
-void ALFTranslator::setPHICopiesForSuccessor (BasicBlock *PredBlock, BasicBlock *Successor) {
-  Twine LabelPrefix = getInstructionLabel(PredBlock, PredBlock->getInstList().size() - 1) +
-                      "::"+getBasicBlockLabel(Successor)+"::phi::";
-  unsigned Ix = 0;
-  for (BasicBlock::iterator I = Successor->begin(); isa<PHINode>(I); ++I) {
-    PHINode *PN = cast<PHINode>(I);
-    Value *IV = PN->getIncomingValueForBlock(PredBlock);
-    if (!isa<UndefValue>(IV)) {
-	  SExpr* Code = ACtx->store(ACtx->address(getValueName(I)),buildOperand(IV));
-	  CurrentBlock->addStatement(LabelPrefix + (utostr(Ix++)),
-	                             "Set PHI node: " + valueToString(*PN) + " to " + valueToString(*IV),
-	                             Code);
-    }
-  }
 }
 
 // Constant Expressions which could not be folded by LLVM itself
@@ -1465,11 +1495,11 @@ std::auto_ptr<ALFConstant> ALFTranslator::foldBinaryConstantExpression(const Con
 
 
 // Constant Pointers ~ compile-time address arithmetic
-uint64_t ALFTranslator::getConstantPointerOffset(const ConstantExpr* CE) {
+int64_t ALFTranslator::getConstantPointerOffset(const ConstantExpr* CE) {
 
 	assert(CE->getOpcode() == Instruction::GetElementPtr && "[llvm2alf]: getConstantPointerOffset(): Not a GEP expression");
 
-	uint64_t BitOffset = 0;
+	int64_t BitOffset = 0;
 
 	// Calculate offset
 	for (gep_type_iterator I = gep_type_begin(CE), E = gep_type_end(CE); I != E; ++I) {
@@ -1487,18 +1517,18 @@ uint64_t ALFTranslator::getConstantPointerOffset(const ConstantExpr* CE) {
 }
 
 // Pointers and run-time address arithmetic
-SExpr* ALFTranslator::buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, uint64_t> >& Offsets)
+SExpr* ALFTranslator::buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, int64_t> >& Offsets)
 {
     // Pass 1: Fold constants
     int PtrBitWidth = getBitWidth(Ptr->getType());
-    uint64_t ConstantOffset = 0;
-    SmallVector<std::pair<Value*, uint64_t>, 4> DynamicOffsets;
-    for (SmallVectorImpl<std::pair<Value*, uint64_t> >::iterator I = Offsets.begin(), E = Offsets.end();
+    int64_t ConstantOffset = 0;
+    SmallVector<std::pair<Value*, int64_t>, 4> DynamicOffsets;
+    for (SmallVectorImpl<std::pair<Value*, int64_t> >::iterator I = Offsets.begin(), E = Offsets.end();
          I != E; ++I) {
         if (! I->first) {
             ConstantOffset += I->second;
         } else if( ConstantInt* EIx = dyn_cast<ConstantInt>(I->first)) {
-            ConstantOffset += EIx->getLimitedValue() * I->second;
+            ConstantOffset += EIx->getSExtValue() * I->second;
         } else {
             DynamicOffsets.push_back(*I);
         }
@@ -1506,27 +1536,28 @@ SExpr* ALFTranslator::buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*,
     // Build Operand (First argument to innermost add, if any)
     SExpr* Expr = buildPointer(Ptr, ConstantOffset);
     // Build offset calculation (innermost to outermost)
-    for (SmallVectorImpl<std::pair<Value*, uint64_t> >::reverse_iterator I = DynamicOffsets.rbegin(), E = DynamicOffsets.rend();
+    for (SmallVectorImpl<std::pair<Value*, int64_t> >::reverse_iterator I = DynamicOffsets.rbegin(), E = DynamicOffsets.rend();
          I != E; ++I) {
         Type* IndexType = IntegerType::get(Ptr->getContext(), PtrBitWidth);
         Constant* IndexMultiplier = ConstantInt::get(IndexType, bitsToLAU(I->second), false);
-        Expr = ACtx->list("add")
-              ->append(PtrBitWidth)
-              ->append(Expr)
-              ->append(buildMultiplication(PtrBitWidth, I->first, IndexMultiplier))
-              ->append(ACtx->dec_unsigned(1,0));
+        Expr = ACtx->add(PtrBitWidth, Expr,
+                buildMultiplication(PtrBitWidth, I->first, IndexMultiplier));
     }
     return Expr;
 }
 
-SExpr* ALFTranslator::buildPointer(Value *Operand, uint64_t Offset) {
-    // Pass 1: Open add expressions
+/// Pointer arithmetic: add/subtract the given offset (in bits) to/from the operand
+SExpr* ALFTranslator::buildPointer(Value *Operand, int64_t Offset) {
     // assert(Operand->getType()->isPointerTy() && "emitPointer: not a pointer type");
-    return ACtx->list("add")
-              ->append(getBitWidth(Operand->getType()))
-              ->append(buildOperand(Operand))
-              ->append(ACtx->offset(Offset))
-              ->append(ACtx->dec_unsigned(1,0));
+    uint64_t BitWidth = getBitWidth(Operand->getType());
+    SExpr *OpExpr = buildOperand(Operand);
+    if(Offset == 0)
+        return OpExpr;
+    if(Offset < 0) {
+        return ACtx->sub(BitWidth, OpExpr, ACtx->offset(-Offset));
+    } else {
+        return ACtx->add(BitWidth, OpExpr, ACtx->offset(Offset));
+    }
 }
 
 // Multiplication takes two operands i<n> A and i<m> B,
@@ -1670,7 +1701,7 @@ std::string ALFTranslator::getAnonValueName(const Value* Operand) {
 	return utostr(No);
 }
 
-uint64_t ALFTranslator::getBitOffset(CompositeType* Ty, uint64_t Index) {
+int64_t ALFTranslator::getBitOffset(CompositeType* Ty, int64_t Index) {
 
 	if(StructType *StrucTy = dyn_cast<StructType>(Ty)) {
 		return TD->getStructLayout(StrucTy)->getElementOffsetInBits(Index);
@@ -1681,14 +1712,14 @@ uint64_t ALFTranslator::getBitOffset(CompositeType* Ty, uint64_t Index) {
 	}
 }
 
-std::pair<Value*, uint64_t> ALFTranslator::getBitOffset(CompositeType* Ty, Value* Index) {
+std::pair<Value*, int64_t> ALFTranslator::getBitOffset(CompositeType* Ty, Value* Index) {
 
     if (ConstantInt* CI = dyn_cast<ConstantInt>(Index)) {
-        uint64_t Offset = getBitOffset(Ty, CI->getLimitedValue());
+        int64_t Offset = getBitOffset(Ty, CI->getSExtValue());
         return std::make_pair((Value*)0, Offset);
     } else if(const SequentialType *SeqTy = dyn_cast<SequentialType>(Ty)) {
         // Sequential types: offset is index times element size
-        unsigned ElementBitWidth = TD->getTypeAllocSize(SeqTy->getElementType()) * 8;
+        int64_t ElementBitWidth = TD->getTypeAllocSize(SeqTy->getElementType()) * 8;
         return std::make_pair(Index, ElementBitWidth);
     } else {
         alf_fatal_error("visitGetElementPtrInst: Unexpected/Unsupported type in address arithmetic", *Ty);

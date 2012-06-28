@@ -33,11 +33,11 @@ bb:
   %tmp2 = bitcast %struct.s* %tmp to i8*, !dbg !46
   %tmp3 = bitcast %struct.s* %tmp1 to i8*, !dbg !46
   call void @llvm.memcpy.p0i8.p0i8.i32(i8* %tmp2, i8* %tmp3, i32 20, i32 4, i1 false), !dbg !46
-  %tmp4 = volatile load i16* @vol, align 2, !dbg !47
+  %tmp4 = load volatile i16* @vol, align 2, !dbg !47
   %tmp5 = and i16 %tmp4, 4095
   %tmp6 = getelementptr inbounds %struct.s* %tmp, i32 0, i32 3, i32 0, !dbg !47
   store i16 %tmp5, i16* %tmp6, align 2, !dbg !47
-  %tmp7 = volatile load i16* @vol, align 2, !dbg !48
+  %tmp7 = load volatile i16* @vol, align 2, !dbg !48
   %tmp8 = trunc i16 %tmp7 to i8
   %tmp9 = and i8 %tmp8, 15
   %tmp10 = getelementptr inbounds %struct.s* %tmp, i32 0, i32 3, i32 1, !dbg !48

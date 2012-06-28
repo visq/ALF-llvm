@@ -7,7 +7,7 @@ target triple = "i386-pc-linux-gnu"
 define i32 @nondet_u32(i32 %lb) nounwind {
 bb:
   call void @llvm.dbg.value(metadata !{i32 %lb}, i64 0, metadata !13), !dbg !14
-  %tmp = volatile load i32* @g, align 4, !dbg !15
+  %tmp = load volatile i32* @g, align 4, !dbg !15
   call void @llvm.dbg.value(metadata !{i32 %tmp}, i64 0, metadata !17), !dbg !15
   %tmp1 = icmp ult i32 %tmp, %lb, !dbg !18
   br i1 %tmp1, label %bb2, label %bb3, !dbg !18

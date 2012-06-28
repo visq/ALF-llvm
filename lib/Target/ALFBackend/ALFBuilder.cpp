@@ -15,19 +15,7 @@
 #include "ALFBuilder.h"
 
 namespace alf {
-SExpr* ALFContext::identifier(const Twine& ident) {
-    std::string Ident = ident.str();
-    std::stringstream QuotedIdent;
-    QuotedIdent << "\"";
-    for (unsigned i = 0, e = Ident.size(); i != e; ++i) {
-        if (Ident[i] == '"' || Ident[i] == '\\') {
-            QuotedIdent << "\\";
-        }
-        QuotedIdent << (char)Ident[i];
-    }
-    QuotedIdent << "\"";
-    return atom(QuotedIdent.str());
-}
+
 void ALFBuilder::addInit(const Twine& Name, uint64_t Offset, SExpr* InitValue, bool Volatile, bool ReadOnly) {
     SExprList *Ref  = list("ref")->append(identifier(Name))->append(offset(Offset));
     SExprList *Init = list("init")->append(Ref)
@@ -87,7 +75,7 @@ void ALFBuilder::writeToFile(ALFOutput& Output) {
     Output.endList("decls");
     Output.startList("inits");
     for(std::vector<SExpr*>::iterator I = Initializers.begin(), E = Initializers.end(); I!=E; ++I) {
-        Output.sexpr(*I);
+        Output.sexpr(*I, true);
     }
     Output.endList("inits");
     // Define Functions

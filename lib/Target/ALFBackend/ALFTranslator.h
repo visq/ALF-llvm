@@ -172,6 +172,9 @@ namespace llvm {
     /// Whether volatiles should be ignored
     bool IgnoreVolatiles;
 
+    /// Special frames for volatile loads
+    std::map<std::string, unsigned> VolatileStorage;
+
     /// Memory Areas
     std::vector<MemoryArea> MemoryAreas;
 
@@ -242,6 +245,10 @@ namespace llvm {
     	delete TCtx;
     	delete Mang;
     }
+
+    /// should be called before writing the output
+    void addVolatileFrames();
+
     /// translate a function
     void translateFunction(const Function *F, ALFFunction *AF);
 
@@ -268,8 +275,13 @@ namespace llvm {
     void addInitializers(Module &M, GlobalVariable &V,unsigned BitOffset, Constant* C);
 
     /// Add initializers for a vector or array type
-    template<typename Const>
-    void addCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, Const* C);
+    void addCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantArray* C);
+
+    /// Add initializers for a vector or array type
+    void addCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantVector* C);
+
+    /// Add initializers for a vector or array type
+    void addCompositeInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantDataSequential* C);
 
     /// Add initializers for a struct type
     void addStructInitializers(Module &M, GlobalVariable& V, unsigned BitOffset, ConstantStruct* Const);
@@ -297,7 +309,7 @@ namespace llvm {
     /// Constant Folding
     std::auto_ptr<ALFConstant> foldBinaryConstantExpression(const ConstantExpr* CE);
 
-    uint64_t getConstantPointerOffset(const ConstantExpr* CE);
+    int64_t getConstantPointerOffset(const ConstantExpr* CE);
 
     // Instruction visitation functions
     friend class InstVisitor<ALFTranslator>;
@@ -350,8 +362,9 @@ namespace llvm {
     SExpr* buildFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instruction::CastOps op);
 
     SExpr* buildMultiplication(unsigned BitWidth, Value* Op1, Value* Op2);
-    SExpr* buildPointer(Value *Ptr, uint64_t Offset);
-    SExpr* buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, uint64_t> >& Offsets);
+    /// Pointer arithmetic: add the given offset (in bits) to the operand
+    SExpr* buildPointer(Value *Ptr, int64_t OffsetInBit);
+    SExpr* buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, int64_t> >& BitOffsets);
 
     std::string interpretASMConstraint(InlineAsm::ConstraintInfo& c);
 
@@ -449,12 +462,11 @@ namespace llvm {
         return ACtx->float_val(getExpWidth(FPTy), getFracWidth(FPTy), Value);
     }
 
-    /// Set all PHI variables of the successor block, assuming the predecessor is known
-    void setPHICopiesForSuccessor(BasicBlock *PredBlock, BasicBlock* SuccBlock);
-
     /// ALF name for volatile storage of the given type
     std::string getVolatileStorage(Type* Ty) {
-        return "$volatile_" + utostr(getBitWidth(Ty));
+        std::string Ref = "$volatile_" + utostr(getBitWidth(Ty));
+        VolatileStorage.insert(make_pair(Ref, getBitWidth(Ty)));
+        return Ref;
     }
 
     /// ALF variable name of some Value (except BasicBlock labels, see getBasicBlockLabel)
@@ -474,10 +486,10 @@ namespace llvm {
 
 
     /// Get bit offset of subtype at Index of a composite type
-    uint64_t getBitOffset(CompositeType* Ty, uint64_t Index);
+    int64_t getBitOffset(CompositeType* Ty, int64_t Index);
 
     /// Get bit offset (Ins,C) interpreted C * valueOf(Ins) of subtype at Index of a composite type
-    std::pair<Value*, uint64_t> getBitOffset(CompositeType* Ty, Value* Index);
+    std::pair<Value*, int64_t> getBitOffset(CompositeType* Ty, Value* Index);
 
     /// Get number of bits needed to represent the given type in the ALF memory model
     /// Uses TargetData TD to support platfrom-specific behavior

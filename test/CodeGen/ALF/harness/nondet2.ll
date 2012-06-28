@@ -9,7 +9,7 @@ target triple = "i386-pc-linux-gnu"
 define i32 @nondet_int() nounwind {
 bb:
   %tmp = load i32** @vint_ptr, align 4, !dbg !12
-  %tmp1 = volatile load i32* %tmp, align 4, !dbg !12
+  %tmp1 = load volatile i32* %tmp, align 4, !dbg !12
   ret i32 %tmp1, !dbg !12
 }
 
