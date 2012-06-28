@@ -340,7 +340,8 @@ public:
             return Ctx->address(Name, Offset);
         }
     }
-    void addOffset(uint64_t OffsIncrement) {
+    void addOffset(int64_t OffsIncrement) {
+        assert((int64_t)Offset + OffsIncrement >= 0 && "Invalid argument to addOffset (to small)");
         Offset += OffsIncrement;
     }
     std::string getFrame() {

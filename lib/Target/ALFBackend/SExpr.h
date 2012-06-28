@@ -62,7 +62,8 @@ public:
   virtual SExprList* asList() { return 0; }
   /// cast to atom
   virtual SExprAtom* asAtom() { return 0; }
-
+  /// get number of characters
+  virtual unsigned getLength() const = 0;
   /// print SExpr
   virtual void print(std::ostream& out) const = 0;
 };
@@ -88,6 +89,10 @@ public:
   virtual SExprAtom* asAtom() {
     return this;
   }
+  virtual unsigned getLength() const {
+      return Value.length();
+  }
+
   std::string getValue() {
     return Value;
   }
@@ -100,22 +105,30 @@ public:
 class SExprList : public SExpr {
     /// List elements
     std::vector<SExpr*> Children;
+    unsigned Length;
 public:
     typedef std::vector<SExpr*>::iterator list_iterator;
     SExprList(SExprContext *ctx) : SExpr(ctx) {
         setInline();
+        Length = 2;
     }
     SExprList(SExprContext *ctx, const Twine& comment) : SExpr(ctx,comment) {
         setInline();
+        Length = 2;
     }
     virtual ~SExprList() {
     }
     virtual SExprList* asList() {
       return this;
     }
+    virtual unsigned getLength() const {
+        return Length;
+    }
     SExprList* append(SExpr *C) {
         Children.push_back(C);
         if(! C->isInline()) setInline(false);
+        if(Length > 2) ++Length; /* Separator */
+        Length += C->getLength();
         return this;
     }
     list_iterator begin() {

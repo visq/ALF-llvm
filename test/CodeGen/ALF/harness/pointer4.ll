@@ -17,7 +17,7 @@ bb:
   store i8 6, i8* inttoptr (i32 2031618 to i8*), align 2, !dbg !16
   call void @llvm.dbg.value(metadata !17, i64 0, metadata !18), !dbg !19
   call void @llvm.dbg.value(metadata !7, i64 0, metadata !8), !dbg !20
-  volatile store i32 23, i32* inttoptr (i32 32 to i32*), align 32, !dbg !21
+  store volatile i32 23, i32* inttoptr (i32 32 to i32*), align 32, !dbg !21
   call void @llvm.dbg.value(metadata !22, i64 0, metadata !18), !dbg !23
   call void @llvm.dbg.value(metadata !7, i64 0, metadata !8), !dbg !24
   call void @llvm.dbg.value(metadata !25, i64 0, metadata !26), !dbg !28

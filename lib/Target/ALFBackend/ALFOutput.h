@@ -49,6 +49,7 @@ namespace llvm {
           unsigned BitsFRef, BitsLRef, BitsOffset;
 
       public:
+          static const unsigned MAX_RIBBON_LENGTH = 60;
 
           ALFOutput(formatted_raw_ostream &o,
                     unsigned leastAddrUnit,
@@ -209,13 +210,14 @@ namespace llvm {
           }
 
           // recursive printing of SExprs
-          void sexpr(alf::SExpr *SE) {
+          void sexpr(alf::SExpr *SE, bool ForceLineBreak = false) {
               if(alf::SExprList* List = SE->asList()) {
                   alf::SExprList::list_iterator I = List->begin(), E = List->end();
                   if(I == E) {
                       report_fatal_error("Invalid ALF SExpr: empty list");
                   } else if(alf::SExprAtom *ListHead = (*I)->asAtom()) {
-                      startList(ListHead->getValue(), List->isInline());
+                      bool PrintInline = List->isInline() && !ForceLineBreak && List->getLength() <= MAX_RIBBON_LENGTH;
+                      startList(ListHead->getValue(), PrintInline);
                       I++;
                       while(I != E) {
                           sexpr(*I++);

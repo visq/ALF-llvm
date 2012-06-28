@@ -10,7 +10,7 @@ bb:
   br label %bb1, !dbg !23
 
 bb1:                                              ; preds = %bb3, %bb
-  %tmp = volatile load i32* @out, align 4, !dbg !23
+  %tmp = load volatile i32* @out, align 4, !dbg !23
   %tmp2 = icmp eq i32 %tmp, 0, !dbg !23
   br i1 %tmp2, label %bb4, label %bb3, !dbg !23
 

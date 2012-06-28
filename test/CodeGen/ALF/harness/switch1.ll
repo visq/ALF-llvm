@@ -10,7 +10,7 @@ bb:
   call void @llvm.dbg.value(metadata !{i32 %lb}, i64 0, metadata !16), !dbg !17
   call void @llvm.dbg.value(metadata !{i32 %ub}, i64 0, metadata !18), !dbg !19
   %tmp = load i32** @u32_ptr, align 4, !dbg !20
-  %tmp1 = volatile load i32* %tmp, align 4, !dbg !20
+  %tmp1 = load volatile i32* %tmp, align 4, !dbg !20
   call void @llvm.dbg.value(metadata !{i32 %tmp1}, i64 0, metadata !22), !dbg !20
   %tmp2 = icmp ult i32 %tmp1, %lb, !dbg !23
   br i1 %tmp2, label %bb3, label %bb4, !dbg !23

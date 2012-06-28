@@ -10,7 +10,7 @@ target triple = "i386-pc-linux-gnu"
 define signext i8 @nondet_i8() nounwind {
 bb:
   %tmp = load i8** @i8_ptr, align 4, !dbg !24
-  %tmp1 = volatile load i8* %tmp, align 1, !dbg !24
+  %tmp1 = load volatile i8* %tmp, align 1, !dbg !24
   ret i8 %tmp1, !dbg !24
 }
 
@@ -19,7 +19,7 @@ bb:
   call void @llvm.dbg.value(metadata !{i32 %lb}, i64 0, metadata !26), !dbg !27
   call void @llvm.dbg.value(metadata !{i32 %ub}, i64 0, metadata !28), !dbg !29
   %tmp = load i32** @u32_ptr, align 4, !dbg !30
-  %tmp1 = volatile load i32* %tmp, align 4, !dbg !30
+  %tmp1 = load volatile i32* %tmp, align 4, !dbg !30
   call void @llvm.dbg.value(metadata !{i32 %tmp1}, i64 0, metadata !32), !dbg !30
   %tmp2 = icmp ult i32 %tmp1, %lb, !dbg !33
   br i1 %tmp2, label %bb3, label %bb4, !dbg !33

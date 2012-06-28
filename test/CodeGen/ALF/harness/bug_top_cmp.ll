@@ -15,7 +15,7 @@ bb1:                                              ; preds = %bb
   br label %bb3, !dbg !15
 
 bb2:                                              ; preds = %bb
-  volatile store i32 1, i32* @x, align 4, !dbg !17
+  store volatile i32 1, i32* @x, align 4, !dbg !17
   br label %bb3, !dbg !18
 
 bb3:                                              ; preds = %bb2, %bb1

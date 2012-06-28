@@ -35,7 +35,7 @@ bb:
   call void @llvm.dbg.value(metadata !27, i64 0, metadata !28), !dbg !30
   call void @llvm.dbg.value(metadata !31, i64 0, metadata !32), !dbg !33
   call void @llvm.dbg.value(metadata !34, i64 0, metadata !35), !dbg !36
-  %tmp = volatile load i32* @select, align 4, !dbg !37
+  %tmp = load volatile i32* @select, align 4, !dbg !37
   %tmp1 = srem i32 %tmp, 3, !dbg !37
   switch i32 %tmp1, label %bb4 [
     i32 0, label %bb2
