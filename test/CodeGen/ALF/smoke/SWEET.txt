@@ -1,0 +1,33 @@
+Important Options
+=================
+
+* Check a file
+sweet -i=$M.alf -c
+
+* Provide input/output annotations
+sweet -i=$M.alf outannot=$M.oannot annot=$M.annot -ae debug=trace
+
+Annotations:
+<pos> <upd> ( || <var> <val>)*
+pos:
+ PROG_ENTRY
+ FUNC_ENTRY main
+ STMT_ENTRY main main::bb
+ also WHEN_CALLED, VOLATILE, STMT_EXIT
+upd:
+ ASSIGN
+ GLB (intersection)
+ LUB (union)
+var:
+ <frefid> <foffs>? <size>? <repeat>?
+ RET_VAL <foffs> <size> (only for WHEN_CALLED)
+val:
+ INT [ <ival> | <ilow> <iupp> <icmul>? ]
+ or FLOAT, ADDR, LABEL
+ TOP_{TYPE}
+
+Output annotations
+spec: (<position> <var_list> ";")+
+position: STMT_(ENTRY|EXIT) <func> <lrefid> [<loffs>]
+var_list: var (|| var_list)*
+var: <frefid> [<foffs> [<size>]]
