@@ -7,11 +7,11 @@ entry:
                                       i32 1, label %onone
                                       i32 2, label %ontwo ]
 onzero:
-  ret i32 1
-onone:
-  ret i32 2
-ontwo:
-  ret i32 0
-otherwise:
   ret i32 3
+onone:
+  ret i32 0
+ontwo:
+  ret i32 1
+otherwise:
+  ret i32 2
 }
