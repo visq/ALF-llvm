@@ -193,7 +193,7 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
     // Add statements covering all of the instructions in the basic block...
     unsigned Index = 0;
     for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ++II) {
-        CurrentInsIndex = Index++;
+        setCurrentInstruction(II, Index++);
         // Do not emit code for PHI nodes, debug instructions or inlineable instructions
         if (isa<PHINode>(*II) || isa<DbgInfoIntrinsic>(*II), isInlinableInst(*II)) {
             continue;
@@ -203,7 +203,7 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
             // ALF variable. Directly *ACtxter* the store, the value
             // of emitLoad(I) is equivalent to emitExpression(I)
             SExpr *Store = ACtx->store(ACtx->address(getValueName(&*II)), buildExpression(&*II));
-            addStatement(*II, CurrentInsIndex, Store);
+            addStatement(Store);
         } else {
             visit(*II);
         }
@@ -211,9 +211,19 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
     }
 }
 
-/// Add the ALF statement for the specified instruction to the current basic group
-void ALFTranslator::addStatement(const Instruction& Ins, unsigned Index, SExpr *Code) {
-    CurrentBlock->addStatement(getInstructionLabel(Ins.getParent(), Index), getStatementComment(Ins, Index), Code);
+
+/// Add an ALF statement for the current LLVM instruction in the current statement block
+void ALFTranslator::addStatement(SExpr *Code) {
+    std::string StatementLabel = getInstructionLabel(CurrentInstruction->getParent(), CurrentInsIndex);
+    if(CurrentHelperBlock)
+        StatementLabel += "::" + *CurrentHelperBlock;
+    if(CurrentInsCounter > 0)
+        StatementLabel += "::" + utostr(CurrentInsCounter);
+    bool IsFirst = !CurrentHelperBlock && CurrentInsCounter == 0;
+    CurrentBlock->addStatement(StatementLabel,
+                               IsFirst ? getStatementComment(*CurrentInstruction, CurrentInsIndex) : "",
+                               Code);
+    CurrentInsCounter++;
 }
 
 /// Build a comment describing a statement
@@ -498,6 +508,74 @@ SExpr* ALFTranslator::buildGlobalValue(const GlobalValue *GV, uint64_t Offset) {
 	}
 }
 
+/// isExpressionInst - Check whether the instruction corresponds
+///  to an ALF expression, not an ALF statement.
+///  - PHI node variables are assigned in the predecessor basic block,
+///    and thus are always variable expressions.
+///  - Static size allocas are represented by address expressions
+///  - Loads are ALF expressions, but we need to take care of read-after-write hazards
+///    when deciding about inlining (see isInlinableInst)
+///  - Select can be represented as ALF expression, but this weakens the precision
+//     of the restriction mechanism in SWEET (switch: ENABLE_SELECT_EXPRESSIONS)
+bool ALFTranslator::isExpressionInst(const Instruction &I) {
+    if (I.getType() == Type::getVoidTy(I.getContext())
+        || isa<TerminatorInst>(I)
+        || isa<CallInst>(I)
+        || isa<StoreInst>(I)
+        || isa<InsertElementInst>(I)
+        || isa<InsertValueInst>(I)
+        || isa<ShuffleVectorInst>(I)
+        || isa<VAArgInst>(I)) {
+        return false;
+    }
+#ifndef ENABLE_SELECT_EXPRESSIONS
+    if(isa<SelectInst>(I)) return false;
+#endif
+    if(isa<AllocaInst>(I)) {
+        const AllocaInst* AI = cast<AllocaInst>(&I);
+        if(! isStaticSizeAlloca(AI)) return false;
+    }
+    return true;
+}
+
+// We must no inline an instruction if:
+//  - it does not have an expression type (jumps, stores)
+//  - it is a dynamic alloca (which needs to be freed at the end of the function)
+//  - it is inline assembler, an extract element, or a shufflevector instruction
+// Additionally, we do not inline an instruction if:
+//  - it is a load instruction (to avoid read-after write hazards. XXX: not always necessary),
+//    except for loads of composite-type values (which are no-ops)
+//  - it is used more than once (XXX: might be beneficial to ignore this rule sometimes)
+//  - it is not defined in the same basic block it is used in (XXX: is this necessary??)
+//  - it is a function call
+bool ALFTranslator::isInlinableInst(const Instruction &I) {
+  // Always inline PHI nodes and static alloca's
+  if(isa<PHINode>(I) || isStaticSizeAlloca(&I))
+      return true;
+
+  // Must be an expression, must be used exactly once.  If it is dead, we
+  // emit it inline where it would go.
+  if (! isExpressionInst(I))
+      return false;
+  if(isa<CallInst>(I))
+      return false;
+  if(isa<LoadInst>(I))
+      return false; /* simplest solution to read-after-write hazards */
+  // Should only have one use
+  if (I.hasOneUse()) {
+    const Instruction &User = cast<Instruction>(*I.use_back());
+    // Must not be used in inline asm, extractelement, or shufflevector.
+    if (isInlineAsm(User) || isa<ExtractElementInst>(User) ||
+        isa<ShuffleVectorInst>(User))
+      return false;
+  } else {
+      return false;
+  }
+
+  // Only inline instruction it if it's use is in the same BB as the inst.
+  return I.getParent() == cast<Instruction>(I.use_back())->getParent();
+}
+
 
 //===----------------------------------------------------------------------===//
 //                        ALF Statement visitors
@@ -515,17 +593,17 @@ void ALFTranslator::visitReturnInst(ReturnInst &I) {
       SExpr *JumpToExit = ACtx->jump(I.getParent()->getParent()->getName() + "::" + RETURN_VALUE_LABEL_SUFFIX);
       if(I.getNumOperands() != 0) {
           SExpr *Store = ACtx->store(ACtx->address(RETURN_VALUE_REF),buildOperand(I.getOperand(0)));
-          addStatement(I, CurrentInsIndex, Store);
-          CurrentBlock->addStatement(getInstructionLabel(I.getParent(),CurrentInsIndex)+"::jump","jump to unique exit node", JumpToExit);
+          addStatement(Store);
+          addStatement(JumpToExit);
       } else {
-          addStatement(I,CurrentInsIndex,JumpToExit);
+          addStatement(JumpToExit);
       }
   } else {
       SExprList* Ret = ACtx->ret();
       if(Value* RetVal = I.getReturnValue()) {
           Ret->append(buildOperand(RetVal));
       }
-      addStatement(I,CurrentInsIndex,Ret);
+      addStatement(Ret);
   }
   assert(! isExpressionInst(I) && "ReturnInst should be a statement, not an expression");
 }
@@ -544,8 +622,7 @@ void ALFTranslator::visitSwitchInst(SwitchInst &SI) {
 	 	  addSwitch(SI, Condition, Cases, SI.getDefaultDest());
 
 	} else { // emulated unconditional branch
-	    addUnconditionalJump(getInstructionLabel(SI.getParent(),CurrentInsIndex), getStatementComment(SI,CurrentInsIndex),
-	                         SI.getParent(), SI.getDefaultDest());
+	    addUnconditionalJump(SI.getParent(), SI.getDefaultDest());
 	}
 }
 
@@ -562,8 +639,7 @@ void ALFTranslator::visitBranchInst(BranchInst &I) {
         addSwitch(I, Condition, Cases, I.getSuccessor(1));
 
     } else {
-        addUnconditionalJump(getInstructionLabel(I.getParent(),CurrentInsIndex), getStatementComment(I,CurrentInsIndex),
-                             I.getParent(), I.getSuccessor(0));
+        addUnconditionalJump(I.getParent(), I.getSuccessor(0));
     }
 }
 
@@ -578,7 +654,7 @@ void ALFTranslator::visitIndirectBrInst(IndirectBrInst &IBI) {
 /// currently emit a nop (which is NOT a good solution IMHO).
 void ALFTranslator::visitUnreachableInst(UnreachableInst &I) {
     assert(! isExpressionInst(I) && "UnreachableInst should be a statement, not an expression");
-    addStatement(I,CurrentInsIndex,ACtx->null());
+    addStatement(ACtx->null());
 }
 
 /// add statement for StoreInst
@@ -591,7 +667,7 @@ void ALFTranslator::visitStoreInst(StoreInst &I) {
     SExpr *LHS = buildOperand(I.getPointerOperand());
     SExpr *RHS = buildOperand(I.getOperand(0));
     assert(! isExpressionInst(I) && "StoreInst should be a statement, not an expression");
-    addStatement(I,CurrentInsIndex,ACtx->store(LHS,RHS));
+    addStatement(ACtx->store(LHS,RHS));
 }
 
 
@@ -648,7 +724,7 @@ void ALFTranslator::visitCallInst(CallInst &I) {
     Call->append(ACtx->address(getValueName(&I), 0));
   }
   assert(! isExpressionInst(I) && "CallInst should be a statement, not an expression");
-  addStatement(I, CurrentInsIndex, Call);
+  addStatement(Call);
 }
 
 /// visitBuiltinCall - Handle the call to the specified builtin.  Returns true
@@ -699,7 +775,7 @@ bool ALFTranslator::visitBuiltinCall(CallInst &I, Intrinsic::ID ID) {
 			      Store->append(ACtx->list("load")->append(8)->append(ValueExpr));
 			  }
 		  }
-		  addStatement(I, CurrentInsIndex, Store);
+		  addStatement(Store);
 		  return true;
 	  }
   case Intrinsic::vastart:
@@ -729,10 +805,9 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
           ->append(buildOperand(I.getTrueValue()))
           ->append(buildOperand(I.getFalseValue()));
 #else
-  std::string InstLabel = getInstructionLabel(I.getParent(), CurrentInsIndex);
-  std::string ThenLabel = InstLabel + "::then";
-  std::string ElseLabel = InstLabel + "::else";
-  std::string JoinLabel = InstLabel + "::join";
+  std::string ThenLabel = getInstructionLabel(I.getParent(), CurrentInsIndex, "then");
+  std::string ElseLabel = getInstructionLabel(I.getParent(), CurrentInsIndex, "else");
+  std::string JoinLabel = getInstructionLabel(I.getParent(), CurrentInsIndex, "join");
 
   SExprList *Switch = ACtx->list("switch");
   SExpr *Cond = buildOperand(I.getCondition());
@@ -743,19 +818,20 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
         ->append(ThenTarget)
         ->append(ElseTarget);
   assert(! isExpressionInst(I) && "SelectInst should be a a statement (! ENABLE_SELECT_EXPRESSIONS)");
-  addStatement(I,CurrentInsIndex,Switch);
+  addStatement(Switch);
 
   // then and else branch
   for(int Branch = 0; Branch < 2; Branch++) {
       // store true/false value
-      std::string Label = Branch == 0 ? ThenLabel : ElseLabel;
+      setCurrentInstruction(Branch == 0 ? "then" : "else");
       SExpr *Val = buildOperand((Branch == 0) ? I.getTrueValue() : I.getFalseValue());
       SExpr *Store = ACtx->store(ACtx->address(getValueName(&I)),Val);
-      CurrentBlock->addStatement(Label, "", Store);
-      CurrentBlock->addStatement(Label + "::jump","", ACtx->jump(JoinLabel));
+      addStatement(Store);
+      addStatement(ACtx->jump(JoinLabel));
   }
-  // join
-  CurrentBlock->addStatement(JoinLabel, "join point for select branch", ACtx->null());
+  // join block
+  setCurrentInstruction("join");
+  addStatement(ACtx->null());
 #endif
 }
 
@@ -996,125 +1072,79 @@ void ALFTranslator::visitGetElementPtrInst(GetElementPtrInst &GepIns) {
     setVisitorResult(GepIns, buildPointer(Ptr, Offsets));
 }
 
-/// Load a value from a frame.
-///
-/// FIXME: We should not load
-/// non-primitive types, as only values of primitive type (int,float)
-/// are defined in ALF.
-///
+/// Load a value from a frame, if it is of scalar value type.
+/// For volatile types, return a load from or a reference to
+/// a volatile frame of the right size.
+/// For non-scalar types, copy all values, and return a reference
+/// to the value.
 /// FIXME: alignment issues are ignored for now
 void ALFTranslator::visitLoadInst(LoadInst &I) {
+  SExpr *OpExpr = buildOperand(I.getOperand(0));
   SExpr *Expr;
-  if(I.isVolatile() && ! IgnoreVolatiles) {
-    Expr = ACtx->load(getBitWidth(I.getType()),getVolatileStorage(I.getType()),0);
-  } else {
-    Expr = ACtx->list("load")
-               ->append(getBitWidth(I.getType()))
-               ->append(buildOperand(I.getOperand(0)));
+  Type *ResultTy = I.getType();
+  bool VolatileAccess = I.isVolatile() && ! IgnoreVolatiles;
+  if(isScalarValueType(ResultTy)) {
+      Expr = loadScalar(ResultTy, OpExpr, VolatileAccess);
+  }  else {
+      addCopyStatements(ResultTy, OpExpr, getValueName(&I), 0, VolatileAccess);
+      Expr = ACtx->address(getValueName(&I), 0);
   }
   setVisitorResult(I,Expr);
 }
 
+SExpr* ALFTranslator::loadScalar(Type *Ty, SExpr *SrcExpr, bool VolatileAccess) {
+    if(VolatileAccess) {
+        return ACtx->load(getBitWidth(Ty),getVolatileStorage(Ty),0);
+    } else {
+        return ACtx->list("load")
+                   ->append(getBitWidth(Ty))
+                   ->append(SrcExpr);
+    }
+}
+
+void ALFTranslator::addCopyStatements(Type *Ty, SExpr *SrcExpr, const Twine& DstName, uint64_t Offset, bool VolatileAccess) {
+    if(isScalarValueType(Ty)) {
+        SExpr *LoadExpr = loadScalar(Ty, buildPointer(SrcExpr, Offset), VolatileAccess);
+        addStatement(ACtx->store(ACtx->address(DstName, Offset), LoadExpr));
+        return;
+    }
+    if(StructType *STy = dyn_cast<StructType>(Ty)) {
+        unsigned Ix = 0;
+        for(StructType::element_iterator I = STy->element_begin(), E = STy->element_end(); I!=E; ++I, ++Ix) {
+            addCopyStatements(*I, SrcExpr, Twine(DstName), Offset+getBitOffset(STy,Ix), VolatileAccess);
+        }
+    } else if(ArrayType *ArrTy = dyn_cast<ArrayType>(Ty)) {
+        for(unsigned Ix = 0; Ix < ArrTy->getNumElements(); ++Ix) {
+            addCopyStatements(ArrTy->getElementType(), SrcExpr, Twine(DstName), Offset+getBitOffset(ArrTy,Ix), VolatileAccess);
+        }
+    } else {
+        alf_fatal_error("Unsupported composite value type for copying");
+    }
+}
+
+/// extract value translates to a load (as we do never load composite types)
+void ALFTranslator::visitExtractValueInst(ExtractValueInst &EVI) {
+    alf_fatal_error("unsupported: visitExtractValueInst", EVI);
+}
+
 void ALFTranslator::visitExtractElementInst(ExtractElementInst &I) {
   alf_fatal_error("unsupported: visitExtractElementInst", I);
-  // We know that our operand is not inlined.
-//  Out << "((";
-//  Type *EltTy =
-//    cast<VectorType>(I.getOperand(0)->getType())->getElementType();
-//  printType(Out, PointerType::getUnqual(EltTy));
-//  Out << ")(&" << getValueName(I.getOperand(0)) << "))[";
-//  /*emitOperand()*/(void)buildOperand(I.getOperand(1));
-//  Out << "]";
 }
 
 
 void ALFTranslator::visitInsertElementInst(InsertElementInst &I) {
   alf_fatal_error("unsupported: visitInsertElementInst", I);
-//  const Type *EltTy = I.getType()->getElementType();
-//  emitOperand(I.getOperand(0));
-//  Out << ";\n  ";
-//  Out << "((";
-//  printType(Out, PointerType::getUnqual(EltTy));
-//  Out << ")(&" << getValueName(&I) << "))[";
-//  emitOperand(I.getOperand(2));
-//  Out << "] = (";
-//  emitOperand(I.getOperand(1));
-//  Out << ")";
 }
 
-void ALFTranslator::visitExtractValueInst(ExtractValueInst &EVI) {
 
-    uint64_t BitOffset = 0;
-    {
-        Type *OpTy = EVI.getAggregateOperand()->getType();
-        for (ExtractValueInst::idx_iterator I = EVI.idx_begin(), E = EVI.idx_end(); I!=E; ++I) {
-            CompositeType *Agg = cast<CompositeType>(OpTy);
-            BitOffset += (uint64_t)getBitOffset(Agg, *I);
-            OpTy = Agg->getTypeAtIndex(*I);
-        }
-    }
-    SExpr *Expr = ACtx->list("select")
-                      ->append(getBitWidth(EVI.getAggregateOperand()->getType()))
-                      ->append(BitOffset)
-                      ->append(BitOffset + getBitWidth(EVI.getType()) - 1)
-                      ->append(buildOperand(EVI.getAggregateOperand()));
-    setVisitorResult(EVI,Expr);
-}
 
 
 void ALFTranslator::visitInsertValueInst(InsertValueInst &IVI) {
     alf_fatal_error("unsupported: visitInsertValueInst", IVI);
-  // Start by copying the entire aggregate value into the result variable.
-//  emitOperand(IVI.getOperand(0));
-//  Out << ";\n  ";
-//
-//  // Then do the insert to update the field.
-//  Out << getValueName(&IVI);
-//  for (const unsigned *b = IVI.idx_begin(), *i = b, *e = IVI.idx_end();
-//       i != e; ++i) {
-//    Type *IndexedTy =
-//      ExtractValueInst::getIndexedType(IVI.getOperand(0)->getType(), b, i+1);
-//    if (IndexedTy->isArrayTy())
-//      Out << ".array[" << *i << "]";
-//    else
-//      Out << ".field" << *i;
-//  }
-//  Out << " = ";
-//  emitOperand(IVI.getOperand(1));
 }
 
 void ALFTranslator::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
     alf_fatal_error("unsupported: visitShuffleVectorInst", SVI);
-//  Out << "(";
-//  printType(Out, SVI.getType());
-//  Out << "){ ";
-//  const VectorType *VT = SVI.getType();
-//  unsigned NumElts = VT->getNumElements();
-//  Type *EltTy = VT->getElementType();
-//
-//  for (unsigned i = 0; i != NumElts; ++i) {
-//    if (i) Out << ", ";
-//    int SrcVal = SVI.getMaskValue(i);
-//    if ((unsigned)SrcVal >= NumElts*2) {
-//      Out << " 0/*undef*/ ";
-//    } else {
-//      Value *Op = SVI.getOperand((unsigned)SrcVal >= NumElts);
-//      if (isa<Instruction>(Op)) {
-//        // Do an extractelement of this value from the appropriate input.
-//        Out << "((";
-//        printType(Out, PointerType::getUnqual(EltTy));
-//        Out << ")(&" << getValueName(Op)
-//            << "))[" << (SrcVal & (NumElts-1)) << "]";
-//      } else if (isa<ConstantAggregateZero>(Op) || isa<UndefValue>(Op)) {
-//        Out << "0";
-//      } else {
-//        printConstant(cast<ConstantVector>(Op)->getOperand(SrcVal &
-//                                                           (NumElts-1)),
-//                      false);
-//      }
-//    }
-//  }
-//  Out << "}";
 }
 
 void ALFTranslator::visitCastInst(CastInst &I) {
@@ -1213,7 +1243,7 @@ SExpr* ALFTranslator::buildLoad(Value* Operand) {
     return ACtx->load(getBitWidth(Operand->getType()),getValueName(Operand));
 }
 
-void ALFTranslator::addUnconditionalJump(const Twine& Label, const Twine& Comment, BasicBlock* Block, BasicBlock* Succ) {
+void ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
     // Assign to the variables which are defined as PHI nodes
     // in a direct successor of the current basic block.
     // Note:   If we set the PHI copy in the direct successor,
@@ -1228,12 +1258,11 @@ void ALFTranslator::addUnconditionalJump(const Twine& Label, const Twine& Commen
         Value *IV = PN->getIncomingValueForBlock(Block);
         if (!isa<UndefValue>(IV)) {
             SExpr* Code = ACtx->store(ACtx->address(getValueName(I)),buildOperand(IV));
-            CurrentBlock->addStatement(Twine(Label) + (Ix ? utostr(Ix) : ""),
-                                       "Set PHI node: " + valueToString(*PN) + " to " + valueToString(*IV),
-                                       Code);
+            Code->setComment("assign to PHI node");
+            addStatement(Code);
         }
     }
-    CurrentBlock->addStatement(Twine(Label) + "::jump", Comment, ACtx->jump(getBasicBlockLabel(Succ)));
+    addStatement(ACtx->jump(getBasicBlockLabel(Succ)));
 }
 
 
@@ -1253,8 +1282,9 @@ void ALFTranslator::addSwitch(TerminatorInst& SI,
 	        SExprList *Target = ACtx->list("target")
 	                                ->append(buildOperand(I->first));
 		    /*emitOperand()*/(void)buildOperand(I->first);
-		    if(isa<PHINode>(I->second->begin())) { /* need to set phi variables on the edge */
-		        Target->append(ACtx->labelRef(getConditionalJumpLabel(BB, I->second)));
+		    if(isa<PHINode>(I->second->begin())) {
+		        /* need to set phi variables on the edge */
+		        Target->append(ACtx->labelRef(getInstructionLabel(BB, CurrentInsIndex, "edge::" + utostr(EdgeBlocks.size()))));
 				EdgeBlocks.insert(I->second);
 		    } else {
                 Target->append(ACtx->labelRef(getBasicBlockLabel(I->second)));
@@ -1263,19 +1293,22 @@ void ALFTranslator::addSwitch(TerminatorInst& SI,
 	  }
 	  SExprList *DefBranch = ACtx->list("default");
 	  if(isa<PHINode>(DefaultCase->begin())) { /* need to set phi variables on the edge */
-	      DefBranch->append(ACtx->labelRef(getConditionalJumpLabel(BB,DefaultCase)));
-		  EdgeBlocks.insert(DefaultCase);
+          /* need to set phi variables on the edge */
+		  DefBranch->append(ACtx->labelRef(getInstructionLabel(BB, CurrentInsIndex, "edge::" + utostr(EdgeBlocks.size()))));
+          EdgeBlocks.insert(DefaultCase);
 	  } else {
 	      DefBranch->append(ACtx->labelRef(getBasicBlockLabel(DefaultCase)));
 	  }
 	  Code->append(DefBranch);
-	  addStatement(SI, CurrentInsIndex, Code);
+	  addStatement(Code);
 
 	  // Insert basic blocks to set phi copies (one for each succ with phi nodes)
+	  unsigned Ix = 0;
 	  for(std::set<BasicBlock*>::const_iterator I = EdgeBlocks.begin(), E = EdgeBlocks.end();
-			  I!=E; ++I) {
+			  I!=E; ++I, ++Ix) {
 		  BasicBlock* Succ = *I;
-		  addUnconditionalJump(getConditionalJumpLabel(BB, Succ), "Assign to PHI node at edge", BB, Succ);
+		  setCurrentInstruction("edge::" + utostr(Ix));
+		  addUnconditionalJump(BB, Succ);
 	  }
 }
 
@@ -1534,7 +1567,7 @@ SExpr* ALFTranslator::buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*,
         }
     }
     // Build Operand (First argument to innermost add, if any)
-    SExpr* Expr = buildPointer(Ptr, ConstantOffset);
+    SExpr* Expr = buildPointer(buildOperand(Ptr), ConstantOffset);
     // Build offset calculation (innermost to outermost)
     for (SmallVectorImpl<std::pair<Value*, int64_t> >::reverse_iterator I = DynamicOffsets.rbegin(), E = DynamicOffsets.rend();
          I != E; ++I) {
@@ -1547,10 +1580,8 @@ SExpr* ALFTranslator::buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*,
 }
 
 /// Pointer arithmetic: add/subtract the given offset (in bits) to/from the operand
-SExpr* ALFTranslator::buildPointer(Value *Operand, int64_t Offset) {
-    // assert(Operand->getType()->isPointerTy() && "emitPointer: not a pointer type");
-    uint64_t BitWidth = getBitWidth(Operand->getType());
-    SExpr *OpExpr = buildOperand(Operand);
+SExpr* ALFTranslator::buildPointer(SExpr *OpExpr, int64_t Offset) {
+    unsigned BitWidth = ACtx->getConfig()->getBitsFRef();
     if(Offset == 0)
         return OpExpr;
     if(Offset < 0) {
@@ -1684,12 +1715,27 @@ std::string ALFTranslator::getBasicBlockLabel(const BasicBlock* BB) {
   return BB->getParent()->getName().str() + "::" + name;
 }
 
+void ALFTranslator::setCurrentInstruction(Instruction *I, unsigned Index) {
+    if(CurrentHelperBlock) {
+        delete CurrentHelperBlock;
+        CurrentHelperBlock = 0;
+    }
+    CurrentInstruction = I;
+    CurrentInsIndex = Index;
+    CurrentInsCounter = 0;
+}
+
+void ALFTranslator::setCurrentInstruction(const std::string& TempBlockLabel) {
+    CurrentHelperBlock  = new std::string(TempBlockLabel);
+    CurrentInsCounter   = 0;
+}
+
 std::string ALFTranslator::getInstructionLabel(const BasicBlock *BB, unsigned Index) {
     return getBasicBlockLabel(BB) + "::" + utostr(Index);
 }
 
-std::string ALFTranslator::getConditionalJumpLabel(const BasicBlock* Pred, const BasicBlock* Succ) {
-    return getBasicBlockLabel(Pred) + "::edge::" + getBasicBlockLabel(Succ);
+std::string ALFTranslator::getInstructionLabel(const BasicBlock *BB, unsigned Index, const std::string& HelperBlock) {
+    return getInstructionLabel(BB, Index) + "::" + HelperBlock;
 }
 
 std::string ALFTranslator::getAnonValueName(const Value* Operand) {

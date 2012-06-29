@@ -163,8 +163,17 @@ namespace llvm {
     /// State for adding statements: Current ALF Statement Group
     ALFStatementGroup *CurrentBlock;
 
+    /// State for adding statements: current LLVM instruction
+    Instruction* CurrentInstruction;
+
     /// State for adding statements: current instruction index
     unsigned CurrentInsIndex;
+
+    /// State for adding statements: ALF statement counter
+    unsigned CurrentInsCounter;
+
+    /// State for adding statements: current helper basic block
+    std::string *CurrentHelperBlock;
 
     /// State for generating expressions via visitors
     SExpr* BuiltExpr;
@@ -218,6 +227,7 @@ namespace llvm {
 	explicit ALFTranslator(ALFBuilder &B, unsigned lau, bool FlagIgnoreVolatiles)
       : LeastAddrUnit(lau),
         Builder(B),
+        CurrentHelperBlock(0),
         IgnoreVolatiles(FlagIgnoreVolatiles),
         NextAnonValueNumber(0),
         TD(0), TCtx(0), TAsm(0), Mang(0)  // initialized in 'initializeTarget
@@ -242,6 +252,7 @@ namespace llvm {
 	mem_areas_iterator mem_areas_end()    { return MemoryAreas.end(); }
 
     virtual ~ALFTranslator() {
+        if(CurrentHelperBlock) delete CurrentHelperBlock;
     	delete TCtx;
     	delete Mang;
     }
@@ -258,8 +269,11 @@ namespace llvm {
     /// process a function definition sginature
     void processFunctionSignature(const Function *F, ALFFunction *AF);
 
-    /// add a statement to the builder
-    void addStatement(const Instruction& Ins, unsigned Index, SExpr *Code);
+    /// add a statement to the current block
+    void addStatement(SExpr *Code);
+
+    /// add specially labeled statement to the current block
+    void addStatement(SExpr *Code, const Twine& Label);
 
     /// set the result of a instruction visitor for 'expression' instructions
     void setVisitorResult(const Instruction& Ins, SExpr *Expr) {
@@ -362,9 +376,7 @@ namespace llvm {
     SExpr* buildFPIntCast(Value* Operand, Type* FloatTy, Type* IntTy, Instruction::CastOps op);
 
     SExpr* buildMultiplication(unsigned BitWidth, Value* Op1, Value* Op2);
-    /// Pointer arithmetic: add the given offset (in bits) to the operand
-    SExpr* buildPointer(Value *Ptr, int64_t OffsetInBit);
-    SExpr* buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, int64_t> >& BitOffsets);
+
 
     std::string interpretASMConstraint(InlineAsm::ConstraintInfo& c);
 
@@ -372,82 +384,23 @@ namespace llvm {
     /// in ALF; pointers (that is, framerefs), integers (signed and unsigned of any size)
     /// and floats (of any size), as well as void type (1 byte)
     /// are considered to be primitive, while all composite types are not
-    static bool isScalarValueType(const Type* Ty) {
+    bool isScalarValueType(const Type* Ty) {
         if(Ty->isVoidTy()) return true;
         if(Ty->isPointerTy()) return true;
+        if(Ty->isIntegerTy()) return true;
         if(Ty->isVectorTy()) return false;
         return Ty->isPrimitiveType();
     }
 
     /// isExpressionInst - Check whether the instruction corresponds
     ///  to an ALF expression, not an ALF statement.
-    ///  - PHI node variables are assigned in the predecessor basic block,
-    ///    and thus are always variable expressions.
-    ///  - Static size allocas are represented by address expressions
-    ///  - Loads are ALF expressions, but we need to take care of read-after-write hazards
-    ///    when deciding about inlining (see isInlinableInst)
-    ///  - Select can be represented as ALF expression, but this weakens the precision
-    //     of the restriction mechanism in SWEET (switch: ENABLE_SELECT_EXPRESSIONS)
-    static bool isExpressionInst(const Instruction &I) {
-        if (I.getType() == Type::getVoidTy(I.getContext())
-            || isa<TerminatorInst>(I)
-            || isa<CallInst>(I)
-            || isa<StoreInst>(I)
-            || isa<InsertElementInst>(I)
-            || isa<InsertValueInst>(I)
-            || isa<ShuffleVectorInst>(I)
-            || isa<VAArgInst>(I)) {
-            return false;
-        }
-#ifndef ENABLE_SELECT_EXPRESSIONS
-        if(isa<SelectInst>(I)) return false;
-#endif
-        if(isa<AllocaInst>(I)) {
-        	const AllocaInst* AI = cast<AllocaInst>(&I);
-        	if(! isStaticSizeAlloca(AI)) return false;
-        }
-        return true;
-    }
+    bool isExpressionInst(const Instruction &I);
 
-    // isInlinableInst - Attempt to inline instructions into their uses to build
-    // trees as much as possible.
-    // We must no inline an instruction if:
-    //  - it does not have an expression type (jumps, stores)
-    //  - it is a dynamic alloca (which needs to be freed at the end of the function)
-    //  - it is inline assembler, an extract element or a shufflevector instruction
-    // Additionally, we do not inline an instruction if:
-    //  - it is a load instruction (to avoid read-after write hazards. XXX: not always necessary)
-    //  - it is used more than once (XXX: might be beneficial to ignore this rule sometimes)
-    //  - it is not defined in the same basic block it is used in (XXX: is this necessary??)
-    //  - it is a function call
-    static bool isInlinableInst(const Instruction &I) {
-      // Always inline PHI nodes and static alloca's
-      if(isa<PHINode>(I) || isStaticSizeAlloca(&I))
-          return true;
-
-      // Must be an expression, must be used exactly once.  If it is dead, we
-      // emit it inline where it would go.
-      if (! isExpressionInst(I)
-           || isa<LoadInst>(I)) /* simplest solution to read-after-write hazards */
-          return false;
-
-      // Should only have one use
-      if (I.hasOneUse()) {
-        const Instruction &User = cast<Instruction>(*I.use_back());
-        // Must not be used in inline asm, extractelement, or shufflevector.
-        if (isInlineAsm(User) || isa<ExtractElementInst>(User) ||
-            isa<ShuffleVectorInst>(User))
-          return false;
-      } else {
-    	  return false;
-      }
-
-      // Only inline instruction it if it's use is in the same BB as the inst.
-      return I.getParent() == cast<Instruction>(I.use_back())->getParent();
-    }
+    /// Return true if an instruction should be inlined
+    bool isInlinableInst(const Instruction &I);
 
     /// Add statements for an unconditional jump
-    void addUnconditionalJump(const Twine& Label, const Twine& Comment, BasicBlock* Block, BasicBlock* Succ);
+    void addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ);
 
     /// Add statements for a conditional branch or switch instruction
     void addSwitch(TerminatorInst& SI, Value* Condition, const CaseVector& Cases, BasicBlock* DefaultCase);
@@ -475,11 +428,17 @@ namespace llvm {
     /// ALF name for a basic block label (needs to be unique to the module)
     std::string getBasicBlockLabel(const BasicBlock *BB);
 
-    /// ALF name for labeling instruction statement (needs to be unique to the module)
+    /// Set the current LLVM instruction
+    void setCurrentInstruction(Instruction *I, unsigned Index);
+
+    /// Set current ALF label to a temporary block within an LLVM instruction
+    void setCurrentInstruction(const std::string& TempBlockLabel);
+
+    /// ALF name for an LLVM instruction at the given Index in BB (needs to be unique to the module)
     std::string getInstructionLabel(const BasicBlock *BB, unsigned Index);
 
-    /// ALF name for the basic block representing the edge of a conditional jump
-    std::string getConditionalJumpLabel(const BasicBlock* Pred, const BasicBlock* Succ);
+    /// ALF name for a helper block for translating LLVM instruction at the given Index in BB
+    std::string getInstructionLabel(const BasicBlock *BB, unsigned Index, const std::string& HelperBlock);
 
 	/// ALF name for anonymous values
     std::string getAnonValueName(const Value* Operand);
@@ -519,6 +478,18 @@ namespace llvm {
 
     /// Collect all LLVM instructions combined in the ALF statement for the given instruction
     void getStatementInstructions(const Instruction &Ins, std::vector<const Instruction*> &InsList);
+
+    /// Pointer arithmetic: add the given offset (in bits) to the operand
+    SExpr* buildPointer(SExpr *Ptr, int64_t OffsetInBit);
+
+    /// Pointer arithmetic: add the given offset (in bits) to the translated operand
+    SExpr* buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, int64_t> >& BitOffsets);
+
+    /// load a scalar value from memory
+    SExpr* loadScalar(Type *Ty, SExpr *SrcExpr, bool VolatileAccess);
+
+    /// add copy statements (load of composite types)
+    void addCopyStatements(Type *Ty, SExpr *SrcExpr, const Twine& DstName, uint64_t Offset, bool VolatileAccess);
 
   };
 }

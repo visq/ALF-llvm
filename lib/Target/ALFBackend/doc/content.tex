@@ -86,6 +86,27 @@ We use the following name translation $\mathcal{T}$ from LLVM names to ALF names
 \item Local Variable (instruction) $v$: $\mathcal{T}(v) = \texttt{\%}v_{\text{name}}$
 \end{itemize}
 
+\subsubsection{Values of Composite Type}
+In LLVM, structs (and vectors, see below) are first-class types.
+In ALF, values (which are loaded,returned,stored,passed as argument,etc.) should
+have integer,float,address or label type, but not composite type.
+Therefore, we represent composite types as frame references, and multiple store
+instructions to implement operations.
+\begin{itemize}
+\item[Constants] Constants of composite type use the repeat and list operands
+of ALF
+\item[Load] For composite types, loads correspond to copying all primitive type
+elements of the value.
+\item[Store] Storing values of composite type amounts to copying all bytes of
+the frame to the destination
+\item[Return] Return values of composite type need to be passed by reference
+as first parameter (as in other backends of LLVM)
+\item[Call] If a called function has composite return type, we need to pass the
+frame reference to the return value storage as first argument
+\end{itemize}
+For vectors, we additionally need to generate parallel assignments for arithmetic
+operations.
+
 \subsubsection{Metainformation}
 
 \subsection{Builder Application Programming Interface}
