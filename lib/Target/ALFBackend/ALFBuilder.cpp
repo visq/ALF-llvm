@@ -130,7 +130,8 @@ void ALFBuilder::writeStatementGroup(ALFFunction* AF, ALFOutput& Output, ALFStat
     Output.incrementIndent();
     for(std::vector<ALFStatement*>::iterator I = Group->stmts_begin(), E = Group->stmts_end(); I!=E; ++I) {
         Output.newline();
-        Output.comment((*I)->getComment(),false);
+	if((*I)->getComment().size() > 0)
+	  Output.comment((*I)->getComment(),false);
         Output.labelRef((*I)->getLabel());
         Output.sexpr((*I)->getCode());
     }

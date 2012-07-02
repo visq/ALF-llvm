@@ -425,6 +425,9 @@ namespace llvm {
     /// ALF variable name of some Value (except BasicBlock labels, see getBasicBlockLabel)
     std::string getValueName(const Value *Operand);
 
+    /// ALF name for a basic block (without function/module prefix)
+    std::string getBlockName(const BasicBlock *BB);
+
     /// ALF name for a basic block label (needs to be unique to the module)
     std::string getBasicBlockLabel(const BasicBlock *BB);
 
