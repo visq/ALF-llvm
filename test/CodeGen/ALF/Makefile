@@ -5,7 +5,7 @@
 # e.g.: clang, llvm-gcc-4.2
 LLVM_FRONTEND?=clang
 # e.g.: -O0, -O1
-LLVM_FRONTEND_CFLAGS?=
+LLVM_FRONTEND_CFLAGS?=-g
 # e.g.: -alf-ignore-volatiles
 LLVM_ALF_FLAGS?=
 
@@ -30,7 +30,7 @@ all:
 
 %.ll: %.c
 ifeq ($(LLVM_FRONTEND),clang)
-	$(LLVM_FRONTEND) $(LLVM_FRONTEND_CFLAGS) -g -Wall -I/usr/include/i386-linux-gnu/ -emit-llvm -S -o - $^ | opt $(LLVM_OPT_FLAGS) | llvm-dis -o $@
+	$(LLVM_FRONTEND) $(LLVM_FRONTEND_CFLAGS) -Wall -I/usr/include/i386-linux-gnu/ -emit-llvm -S -o - $^ | opt $(LLVM_OPT_FLAGS) | llvm-dis -o $@
 else
 	echo "'"$(LLVM_FRONTEND)"'"
 	$(LLVM_FRONTEND) $(LLVM_FRONTEND_CFLAGS) -emit-llvm -c -o - $^ | opt $(LLVM_OPT_FLAGS) | llvm-dis -o $@

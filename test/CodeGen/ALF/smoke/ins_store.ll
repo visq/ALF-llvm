@@ -1,4 +1,4 @@
-; ModuleID = 'ins_stroe'
+; ModuleID = 'ins_store'
 @global = global i32 7
 
 define i32 @main(i32 %argc, i8** %argv) nounwind {
