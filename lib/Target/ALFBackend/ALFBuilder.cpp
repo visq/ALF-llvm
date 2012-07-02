@@ -124,84 +124,31 @@ void ALFBuilder::writeFunction(ALFFunction* AF, ALFOutput& Output) {
 void ALFBuilder::writeStatementGroup(ALFFunction* AF, ALFOutput& Output, ALFStatementGroup *Group) {
     Output.newline();
     Output.comment("--------- BASIC BLOCK " + Group->getComment() + " ----------",false);
-    Output.labelRef(Group->getLabel());
-    Output.startList("null");
-    Output.endList("null");
     Output.incrementIndent();
-    for(std::vector<ALFStatement*>::iterator I = Group->stmts_begin(), E = Group->stmts_end(); I!=E; ++I) {
+    unsigned Ix = 0;
+    for(std::vector<ALFStatement*>::iterator I = Group->stmts_begin(), E = Group->stmts_end(); I!=E; ++I, ++Ix) {
+        if(Ix == 0) {
+             Output.labelRef(Group->getLabel());
+        }
         Output.newline();
-	if((*I)->getComment().size() > 0)
-	  Output.comment((*I)->getComment(),false);
-        Output.labelRef((*I)->getLabel());
+        if((*I)->getComment().size() > 0)
+            Output.comment((*I)->getComment(),false);
+        if(Ix > 0) {
+            Output.labelRef((*I)->getLabel());
+        }
         Output.sexpr((*I)->getCode());
     }
     Output.decrementIndent();
 }
 
-//void ALFTranslator::basicBlockHeader(const BasicBlock* BB) {
+void ALFBuilder::writeMapFile(const std::string& FileName) {
+    std::string ErrorInfo;
+    raw_fd_ostream Out(FileName.c_str(), ErrorInfo);
+    for(std::map<std::string, std::string>::iterator I = SourceCodeMapping.begin(), E = SourceCodeMapping.end();I!=E;++I) {
+        Out << I->first << ";" << I->second << "\n";
+    }
+    Out.close();
+}
 
-//}
-
-//void ALFTranslator::statementHeader(const Instruction &I, unsigned Index) {
-//
-//    Output.comment("LLVM expression: " + I.getParent()->getParent()->getName().str() + "::" +
-//                   I.getParent()->getName().str(), false);
-//    /* output all LLVM instructions combined in this ALF statement. Note that the dependency
-//     * relation is acyclic if all PHI nodes are removed
-//     */
-//    std::vector<const Instruction *> Worklist, Instructions;
-//    Worklist.push_back(&I);
-//    while(! Worklist.size() == 0) {
-//        const Instruction *Ins = Worklist.back();
-//        Worklist.pop_back();
-//        Instructions.push_back(Ins);
-//        for(Instruction::const_op_iterator OI = Ins->op_begin(), OE = Ins->op_end(); OI != OE; ++OI) {
-//            if(Instruction* Op = dyn_cast<Instruction>(OI)) {
-//                if(isa<PHINode>(Op)) continue;
-//                if(! isInlinableInst(*Op)) continue;
-//                Worklist.push_back(Op);
-//            }
-//        }
-//    }
-//    for(std::vector<const Instruction*>::const_reverse_iterator II = Instructions.rbegin(), IE = Instructions.rend(); IE != II; ++ II) {
-//        Output.comment("  " + valueToString(**II), false);
-//    }
-//
-//    CurrentStatementIndex = Index;
-//    if(! IsBasicBlockStart) {
-//        Output.setStmtLabel(getInstructionLabel(I.getParent(),Index));
-//    } else {
-//        IsBasicBlockStart = false;
-//    }
-//}
-//Output.newline();
-//Output.comment("-------------------- STUB FOR UNDEFINED FUNCTION " + F->getName().str() + " --------------------");
-//Output.startList("func");
-//Writer.emitFunctionSignature(F);
-//Output.startList("scope");
-//Output.startList("decls"); Output.endList("decls");
-//Output.startList("inits"); Output.endList("inits");
-//Output.startList("stmts");
-//Output.setStmtLabel(F->getName().str() + "::stub");
-//Output.startStmt("return");
-//Output.load(Writer.getBitWidth(RTy),Writer.getVolatileStorage(RTy),0);
-//Output.endStmt("return");
-//Output.endList("stmts");
-//Output.endList("scope");
-//Output.endList("func");
-
-//Output.newline();
-//Output.comment("-------------------- FUNCTION " + F.getName().str() + " --------------------");
-//Output.startList("func");
-//
-//Writer.emitFunctionSignature(&F);
-//
-//// start function scope
-//Output.startList("scope"); // DECLS INITS STMTS
-//
-//// declare local variables
-//Output.startList("decls");
-//Output.endList("funcs");
-//Output.endList("alf");
 
 } // end namespace alf

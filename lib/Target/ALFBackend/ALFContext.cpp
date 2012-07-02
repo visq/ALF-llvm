@@ -14,6 +14,11 @@
 
 namespace alf {
 
+ALFAddressExpr* ALFContext::address(const Twine& Name, uint64_t OffsetInBits) {
+    ALFAddressExpr *Expr = new ALFAddressExpr(this, Name, OffsetInBits);
+    Pool.push_back(Expr);
+    return Expr;
+}
 SExpr* ALFContext::identifier(const Twine& ident) {
     std::string Ident = ident.str();
     std::stringstream QuotedIdent;
@@ -26,6 +31,10 @@ SExpr* ALFContext::identifier(const Twine& ident) {
     }
     QuotedIdent << "\"";
     return atom(QuotedIdent.str());
+}
+
+SExpr* ALFContext::load(unsigned BitWidth, const Twine& Fref, unsigned Offset) {
+    return list("load")->append(BitWidth)->append(address(Fref,Offset));
 }
 
 } // end namespace alf

@@ -62,7 +62,7 @@ struct Frame {
         return StringRef(FrameName);
     }
     /// Get frame width in bits
-    unsigned getBitWidth() {
+    uint64_t getBitWidth() {
         return BitWidth;
     }
     /// Get frame storage classification
@@ -116,6 +116,9 @@ public:
         Code->setInline(false);
         ALFStatement *Statement = new ALFStatement(Label, Comment, Code);
         Statements.push_back(Statement);
+    }
+    bool empty() {
+        return Statements.empty();
     }
     std::vector<ALFStatement*>::iterator stmts_begin() {
         return Statements.begin();
@@ -206,6 +209,7 @@ class ALFBuilder : public ALFContext {
     std::vector<Frame*> GlobalFrames;
     std::vector<SExpr*> Initializers;
     std::vector<ALFFunction*> Functions;
+    std::map<std::string,std::string> SourceCodeMapping;
 
     /// write ALF function to file
     void writeFunction(ALFFunction* AF, ALFOutput& Output);
@@ -237,8 +241,6 @@ public:
     void setLittleEndian(bool IsLittleEndian) {
         Config.setLittleEndian(IsLittleEndian);
     }
-    /// write ALF module to file
-    void writeToFile(ALFOutput& O);
 
     void importLabel(std::string& FunctionLabel) {
         ImportedLabels.push_back(FunctionLabel);
@@ -259,6 +261,16 @@ public:
         Functions.push_back(AF);
         return AF;
     }
+
+    /// write ALF module to file
+    void writeToFile(ALFOutput& O);
+
+    /// add mapping for an instruction
+    void addMapping(const Twine& ALFName, const Twine& SourceName) {
+        SourceCodeMapping.insert(make_pair(ALFName.str(), SourceName.str()));
+    }
+    /// write mappings to file
+    void writeMapFile(const std::string& FileName);
 };
 
 /// ALF Type

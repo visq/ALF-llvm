@@ -42,56 +42,7 @@ enum SpecialGlobalClass {
     GlobalCtors, GlobalDtors, OtherMetadata
 };
 
-/// Check whether this instruction is a pointer <-> pointer bitcast
-inline bool isPtrPtrBitCast(const Instruction &I) {
-  if (!isa<BitCastInst>(I)) return false;
-  return (I.getOperand(0)->getType()->isPointerTy() && I.getType()->isPointerTy());
-}
-
-/// Check whether this constant expression is a pointer <-> pointer bitcast
-inline bool isPtrPtrBitCast(const ConstantExpr &CE) {
-	if(CE.getOpcode() != Instruction::BitCast) return false;
-    return (CE.getOperand(0)->getType()->isPointerTy() && CE.getType()->isPointerTy());
-}
-
-/// isStaticSizeAlloca - fixed size allocas are implemented by adding a scalar
-/// variable of the given size to the set of local variables of the function,
-/// and assigning the address of that variable to the left-hand-side of the
-/// alloca. It is not required that the alloca is in the entry block,
-/// so AI->isStaticAlloca() is a stronger predicate than isStaticSizeAlloca(AI)
-inline const AllocaInst *isStaticSizeAlloca(const Value *V) {
-  const AllocaInst *AI = dyn_cast<AllocaInst>(V);
-  // not an alloca instruction
-  if (!AI) return 0;
-  // not a fixed size allocation
-  if (!isa<ConstantInt>(AI->getArraySize())) return 0;
-  return AI;
-}
-
-/// isInlineAsm - Check if the instruction is a call to an inline asm chunk
-inline bool isInlineAsm(const Instruction& I) {
-  if (const CallInst *CI = dyn_cast<CallInst>(&I))
-    return isa<InlineAsm>(CI->getCalledValue());
-  return false;
-}
-
-/// Convert a Value into a String (for debugging purposes)
-inline std::string valueToString(const Value& V) {
-	std::string s;
-	raw_string_ostream os(s);
-	V.print(os);
-	return os.str();
-}
-
-/// Convert a type into a String (for debugging purposes)
-inline std::string typeToString(const Type& T) {
-	std::string s;
-	raw_string_ostream os(s);
-	T.print(os);
-	return os.str();
-}
-
-} /* end anonymous namespace */
+} // end anon namespace
 
 namespace llvm {
 
@@ -368,7 +319,6 @@ namespace llvm {
 
     // Expressions
     SExpr* buildOperand(Value *Operand);
-    SExpr* buildLoad(Value* Operand);
 
     /// cast between integer and floating point types
     SExpr* buildIntCast(Value* Ptr, unsigned BitWidthSrc, unsigned BitWidthTarget, bool signExtend);
@@ -407,7 +357,11 @@ namespace llvm {
 
     /// Build integer atom
     SExpr* buildIntNumVal(const APInt& Value) {
-        return ACtx->dec_unsigned(Value.getBitWidth(), Value.getLimitedValue());
+        if(Value.isNegative()) { // nicer to read
+            return ACtx->dec_signed(Value.getBitWidth(), Value.getSExtValue());
+        } else {
+            return ACtx->dec_unsigned(Value.getBitWidth(), Value.getLimitedValue());
+        }
     }
 
     /// Build floating point atom
@@ -449,6 +403,9 @@ namespace llvm {
 
     /// Get bit offset of subtype at Index of a composite type
     int64_t getBitOffset(CompositeType* Ty, int64_t Index);
+
+    /// Get bit offset into a composite type
+    int64_t getBitOffset(CompositeType *Ty, ArrayRef<unsigned> Indices);
 
     /// Get bit offset (Ins,C) interpreted C * valueOf(Ins) of subtype at Index of a composite type
     std::pair<Value*, int64_t> getBitOffset(CompositeType* Ty, Value* Index);
@@ -492,8 +449,13 @@ namespace llvm {
     SExpr* loadScalar(Type *Ty, SExpr *SrcExpr, bool VolatileAccess);
 
     /// add copy statements (load of composite types)
-    void addCopyStatements(Type *Ty, SExpr *SrcExpr, const Twine& DstName, uint64_t Offset, bool VolatileAccess);
+    void addCopyStatements(Type *Ty, SExpr *SrcExpr, SExpr *DstExpr, bool VolatileAccess = false, uint64_t Offset = 0);
 
+    /// add a source code mapping for an instruction
+    void addMapping(Instruction *I);
+
+    /// get source code location corresponding to an instruction (if available)
+    bool getDebugLocation(Instruction *I, std::string& File, int &Line, int &Col);
   };
 }
 

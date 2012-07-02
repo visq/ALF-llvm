@@ -13,26 +13,26 @@
 //
 // Problems, in priority order:
 //
-// TODO: Support flags (like nsw) for arithmetic operations
+// High Priority:
 //
-// TODO: Support for fmod, fmodf, fmodl
+// TODO: Add support for .map files
+//
+// Medium Priority:
 //
 // TODO: Add command line help (-mattr=help)
 //
+// TODO: Support constant composite values and composite return types
+//
+// Low Priority
+//
+// TODO: Support for fmod, fmodf, fmodl
 // TODO: Support for vector types
-//
-// TODO: Support {extract,insert}value
-//
 // TODO: Support more intrinsics (we currently lower ALL intrinsics except mem{cpy,set,move})
 //
-// TODO: Support struct return and byval parameters
-//
 // TODO: Handle Linkage Declarations [1], we cannot handle weak and common linkage at the moment
-//
 // TODO: Handle inline assembler
 //
 // TODO: Handle global CTors/DTors
-//
 // TODO: Support type 'Type::X86_MMXTyID'
 //
 // Note on PHI Nodes:
@@ -73,6 +73,10 @@ extern "C" void LLVMInitializeALFBackendTarget() {
   RegisterTargetMachine<ALFTargetMachine> X(TheALFBackendTarget);
 }
 
+static cl::opt<std::string>
+ALFMapFile("alf-map-file", cl::NotHidden,
+            cl::desc("Emit a map file (linking ALF labels and C source code) using debug information"),
+            cl::init(""));
 
 static cl::opt<std::string>
 ALFTargetData("alf-target-data", cl::NotHidden,
@@ -404,6 +408,10 @@ bool ALFBackend::doFinalization(Module &M) {
     // Write
     Builder.writeToFile(Output);
 
+    //
+    if(ALFMapFile.size() != 0) {
+        Builder.writeMapFile(ALFMapFile);
+    }
     // Free memory...
     delete IL;
     delete TD;

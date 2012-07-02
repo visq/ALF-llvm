@@ -19,7 +19,7 @@ class SExprAtom;
 // Base class for s-expressions (LISP style)
 class SExpr {
 
-    /// Context this expression was created in
+  /// Context this expression was created in
   SExprContext* Ctx;
 
   /// Whether this expression may be printed inline
@@ -58,14 +58,26 @@ public:
     return Ctx;
   }
 
-  /// cast to list
-  virtual SExprList* asList() { return 0; }
-  /// cast to atom
-  virtual SExprAtom* asAtom() { return 0; }
+
   /// get number of characters
   virtual unsigned getLength() const = 0;
   /// print SExpr
   virtual void print(std::ostream& out) const = 0;
+
+  /// cast to list
+  virtual SExprList* asList() { return 0; }
+  /// cast to atom
+  virtual SExprAtom* asAtom() { return 0; }
+  /// support for isa<> and friends
+  static inline bool classof(const SExpr *V) {
+      return true;
+  }
+  /// Returns 0 for generic SExpressions
+  /// Override this method in application-specific contexts
+  /// to get support for isa<>, dyn_cast<> and friends
+  virtual unsigned getValueID() const {
+      return 0;
+  }
 };
 
 /// Operator << for s-expressions
@@ -93,9 +105,10 @@ public:
       return Value.length();
   }
 
-  std::string getValue() {
-    return Value;
+  StringRef getValue() {
+    return StringRef(Value);
   }
+
   virtual void print(std::ostream& out) const {
     out << Value;
   }
@@ -123,6 +136,13 @@ public:
     }
     virtual unsigned getLength() const {
         return Length;
+    }
+    /// ALF s-expressions always have an atom as first element of the list
+    StringRef getHead() {
+        assert(Children.size() > 0 && "SExpr::getHead(): empty list");
+        alf::SExprAtom *ListHead = (*Children.begin())->asAtom();
+        assert(ListHead && "SExpr::getHead(): first element of list is not an atom");
+        return ListHead->getValue();
     }
     SExprList* append(SExpr *C) {
         Children.push_back(C);
@@ -158,7 +178,9 @@ public:
 
 /// Context for creating s-expressions (owner of allocated memory)
 class SExprContext {
-  std::vector<SExpr*> Pool;
+  protected:
+
+    std::vector<SExpr*> Pool;
 
   public:
     virtual ~SExprContext() {
