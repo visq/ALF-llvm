@@ -13,19 +13,24 @@ class FileName
     @file
   end
 end
-index = File.open('index.html','w')
-index.puts("<h1>LLVM->ALF Examples</h1>")
+require 'erb'
+require 'ostruct'
+
+entries = []
 ARGV.each do |file|
 
   f = FileName.new(file)
-  print("#{f.to_s.ljust(19)}")
+  print("#{f.to_s.ljust(25)}")
 
-  compile = "llc -march=alf -alf-standalone -alf-memory-areas=0x00-0xff -o #{f['alf']} #{f}"
+  llc_opts="-march=alf -alf-standalone -alf-memory-areas=0x00-0xff"
+  if File.exist? f['c']
+    llc_opts += " -alf-map-file=#{f['map']}"
+  end
+  compile = "llc #{llc_opts} -o #{f['alf']} #{f}"
   unless system("#{compile} >#{f['cclog']} 2>&1")
     puts "Build failed"
     next
   end
-  
   check = "sweet -i=#{f['alf']} -c"
   unless system("#{check} >#{f['checklog']} 2>&1")
     puts "Check failed"
@@ -51,7 +56,18 @@ ARGV.each do |file|
   else
     puts File.readlines(f['aetrace'])[-1]
   end
-  index.puts("<p>#{f}&nbsp;\n<a href=\"#{f['ll']}\">LLcode</a>")
-  index.puts("&nbsp;<a href=\"#{f['alf']}\">ALFcode</a></p>")
+  entry = OpenStruct.new
+  entry.name = f['ll'].sub(/.ll/,'')
+  entry.links = []
+  entry.links.push(OpenStruct.new(:name => 'LLcode', :href=>f['ll']))
+  entry.links.push(OpenStruct.new(:name => 'ALFcode', :href=>f['alf']))
+  if(File.exist? f['c'])
+    entry.links.push(OpenStruct.new(:name => 'Ccode', :href=>f['c']))
+    entry.links.push(OpenStruct.new(:name => 'Mapping', :href=>f['map']))
+  end
+  entries.push(entry)
 end
+template = ERB.new(File.read('index.html.erb'))
+File.open('index.html','w') { |fh| fh.puts template.result(binding) }
+
 

@@ -1,0 +1,12 @@
+.filename {
+    color: black;
+    font-weight: bold;
+    float: left;
+    clear: left;
+    margin: 10pt;
+    min-width: 150pt;
+}
+.link {
+    margin: 10pt;
+    float: left;
+}
