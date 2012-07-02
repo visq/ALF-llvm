@@ -23,6 +23,59 @@
 #define DEBUG_TYPE "ALF"
 #include "llvm/Support/Debug.h"
 
+/* local utilities */
+namespace {
+
+/// Check whether this instruction is a pointer <-> pointer bitcast
+inline bool isPtrPtrBitCast(const Instruction &I) {
+  if (!isa<BitCastInst>(I)) return false;
+  return (I.getOperand(0)->getType()->isPointerTy() && I.getType()->isPointerTy());
+}
+
+/// Check whether this constant expression is a pointer <-> pointer bitcast
+inline bool isPtrPtrBitCast(const ConstantExpr &CE) {
+    if(CE.getOpcode() != Instruction::BitCast) return false;
+    return (CE.getOperand(0)->getType()->isPointerTy() && CE.getType()->isPointerTy());
+}
+
+/// isStaticSizeAlloca - fixed size allocas are implemented by adding a scalar
+/// variable of the given size to the set of local variables of the function,
+/// and assigning the address of that variable to the left-hand-side of the
+/// alloca. It is not required that the alloca is in the entry block,
+/// so AI->isStaticAlloca() is a stronger predicate than isStaticSizeAlloca(AI)
+inline const AllocaInst *isStaticSizeAlloca(const Value *V) {
+  const AllocaInst *AI = dyn_cast<AllocaInst>(V);
+  // not an alloca instruction
+  if (!AI) return 0;
+  // not a fixed size allocation
+  if (!isa<ConstantInt>(AI->getArraySize())) return 0;
+  return AI;
+}
+
+/// isInlineAsm - Check if the instruction is a call to an inline asm chunk
+inline bool isInlineAsm(const Instruction& I) {
+  if (const CallInst *CI = dyn_cast<CallInst>(&I))
+    return isa<InlineAsm>(CI->getCalledValue());
+  return false;
+}
+
+/// Convert a Value into a String (for debugging purposes)
+inline std::string valueToString(const Value& V) {
+    std::string s;
+    raw_string_ostream os(s);
+    V.print(os);
+    return os.str();
+}
+
+/// Convert a type into a String (for debugging purposes)
+inline std::string typeToString(const Type& T) {
+    std::string s;
+    raw_string_ostream os(s);
+    T.print(os);
+    return os.str();
+}
+
+} // end anonymous namespace
 
 const string ALFTranslator::NULL_REF("$null");
 const string ALFTranslator::ABS_REF("$mem");
@@ -69,6 +122,7 @@ void llvm::alf_fatal_error(const Twine& Reason, const Function* F) {
 void llvm::alf_warning(const Twine& Msg) {
     errs() << "[llvm2alf] Warning: " << Msg << "\n";
 }
+
 
 /// Translator Interface
 void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
@@ -193,12 +247,12 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
 
     // Add statements covering all of the instructions in the basic block...
     unsigned Index = 0;
-    for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ++II) {
-        setCurrentInstruction(II, Index++);
+    for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ++II, ++Index) {
         // Do not emit code for PHI nodes, debug instructions or inlineable instructions
-        if (isa<PHINode>(*II) || isa<DbgInfoIntrinsic>(*II), isInlinableInst(*II)) {
+        if (isa<PHINode>(*II) || isa<DbgInfoIntrinsic>(*II) || isInlinableInst(*II)) {
             continue;
         }
+        setCurrentInstruction(II, Index);
         if(isExpressionInst(*II)) {
             // Store the value of the instruction in a temporary
             // ALF variable. Directly *ACtxter* the store, the value
@@ -530,8 +584,10 @@ bool ALFTranslator::isExpressionInst(const Instruction &I) {
         || isa<VAArgInst>(I)) {
         return false;
     }
-    if(! isScalarValueType(I.getType()) && isa<LoadInst>(I))
-      return false;
+    if(! isScalarValueType(I.getType())) {
+        if(isa<ExtractValueInst>(I) || isa<LoadInst>(I))
+            return false;
+    }
 #ifndef ENABLE_SELECT_EXPRESSIONS
     if(isa<SelectInst>(I)) return false;
 #endif
@@ -671,8 +727,11 @@ void ALFTranslator::visitStoreInst(StoreInst &I) {
     SExpr *LHS = buildOperand(I.getPointerOperand());
     SExpr *RHS = buildOperand(I.getOperand(0));
     assert(! isExpressionInst(I) && "StoreInst should be a statement, not an expression");
-    // TODO: addCopyStatements(I.getType(), LHS, RHS, 0, false);
-    addStatement(ACtx->store(LHS,RHS));
+    if(isScalarValueType(I.getOperand(0)->getType())) {
+        addStatement(ACtx->store(LHS,RHS));
+    } else {
+        addCopyStatements(I.getOperand(0)->getType(), RHS, LHS);
+    }
 }
 
 
@@ -1093,7 +1152,7 @@ void ALFTranslator::visitLoadInst(LoadInst &I) {
       Expr = loadScalar(ResultTy, OpExpr, VolatileAccess);
       setVisitorResult(I,Expr);
   }  else {
-      addCopyStatements(ResultTy, OpExpr, getValueName(&I), 0, VolatileAccess);
+      addCopyStatements(ResultTy, OpExpr, ACtx->address(getValueName(&I)), VolatileAccess);
       return;
   }
 }
@@ -1108,20 +1167,20 @@ SExpr* ALFTranslator::loadScalar(Type *Ty, SExpr *SrcExpr, bool VolatileAccess) 
     }
 }
 
-void ALFTranslator::addCopyStatements(Type *DstTy, SExpr *SrcExpr, const Twine& DstName, uint64_t Offset, bool VolatileAccess) {
+void ALFTranslator::addCopyStatements(Type *DstTy, SExpr *SrcExpr, SExpr *DstExpr, bool VolatileAccess,  uint64_t Offset) {
     if(isScalarValueType(DstTy)) {
         SExpr *LoadExpr = loadScalar(DstTy, buildPointer(SrcExpr, Offset), VolatileAccess);
-        addStatement(ACtx->store(ACtx->address(DstName, Offset), LoadExpr));
+        addStatement(ACtx->store(buildPointer(DstExpr, Offset), LoadExpr));
         return;
     }
     if(StructType *STy = dyn_cast<StructType>(DstTy)) {
         unsigned Ix = 0;
         for(StructType::element_iterator I = STy->element_begin(), E = STy->element_end(); I!=E; ++I, ++Ix) {
-            addCopyStatements(*I, SrcExpr, Twine(DstName), Offset+getBitOffset(STy,Ix), VolatileAccess);
+            addCopyStatements(*I, SrcExpr, DstExpr, VolatileAccess, Offset+getBitOffset(STy,Ix));
         }
     } else if(ArrayType *ArrTy = dyn_cast<ArrayType>(DstTy)) {
         for(unsigned Ix = 0; Ix < ArrTy->getNumElements(); ++Ix) {
-            addCopyStatements(ArrTy->getElementType(), SrcExpr, Twine(DstName), Offset+getBitOffset(ArrTy,Ix), VolatileAccess);
+            addCopyStatements(ArrTy->getElementType(), SrcExpr, DstExpr, VolatileAccess, Offset+getBitOffset(ArrTy,Ix));
         }
     } else {
         alf_fatal_error("Unsupported composite value type for copying");
@@ -1130,7 +1189,36 @@ void ALFTranslator::addCopyStatements(Type *DstTy, SExpr *SrcExpr, const Twine& 
 
 /// extract value translates to a load (as we do never load composite types)
 void ALFTranslator::visitExtractValueInst(ExtractValueInst &EVI) {
-    alf_fatal_error("unsupported: visitExtractValueInst", EVI);
+    Type *ResultTy = EVI.getType();
+    CompositeType *AggTy = cast<CompositeType>(EVI.getAggregateOperand()->getType());
+    assert(isa<CompositeType>(AggTy) && "visitExtractValueInst: expecting composite operand type");
+
+    int64_t BitOffset = getBitOffset(AggTy, EVI.getIndices());
+    SExpr *OpExpr = buildPointer(buildOperand(EVI.getAggregateOperand()),BitOffset);
+    if(isScalarValueType(ResultTy)) {
+        SExpr *Expr = loadScalar(ResultTy, OpExpr, false);
+        setVisitorResult(EVI,Expr);
+    }  else {
+        addCopyStatements(ResultTy, OpExpr, ACtx->address(getValueName(&EVI)));
+        return;
+    }
+}
+
+// insert value corresponds to copy, replacing the value of the updated element
+void ALFTranslator::visitInsertValueInst(InsertValueInst &IVI) {
+    assert(isa<CompositeType>(IVI.getType()) && "visitInsertValueInst: expecting composite return type");
+    CompositeType  *AggType  = cast<CompositeType>(IVI.getType());
+    Value *OldValue = IVI.getAggregateOperand();
+    Value *Update   = IVI.getInsertedValueOperand();
+    addCopyStatements(AggType, buildOperand(OldValue), ACtx->address(getValueName(&IVI)));
+    int64_t BitOffset = getBitOffset(AggType, IVI.getIndices());
+    if(isScalarValueType(Update->getType())) {
+        SExpr *LHS = ACtx->address(getValueName(&IVI),BitOffset);
+        SExpr *RHS = buildOperand(Update);
+        addStatement(ACtx->store(LHS,RHS));
+    } else {
+        addCopyStatements(Update->getType(), buildOperand(Update), ACtx->address(getValueName(&IVI), BitOffset));
+    }
 }
 
 void ALFTranslator::visitExtractElementInst(ExtractElementInst &I) {
@@ -1142,12 +1230,6 @@ void ALFTranslator::visitInsertElementInst(InsertElementInst &I) {
   alf_fatal_error("unsupported: visitInsertElementInst", I);
 }
 
-
-
-
-void ALFTranslator::visitInsertValueInst(InsertValueInst &IVI) {
-    alf_fatal_error("unsupported: visitInsertValueInst", IVI);
-}
 
 void ALFTranslator::visitShuffleVectorInst(ShuffleVectorInst &SVI) {
     alf_fatal_error("unsupported: visitShuffleVectorInst", SVI);
@@ -1236,17 +1318,13 @@ SExpr* ALFTranslator::buildOperand(Value *Operand) {
     if(I && isInlinableInst(*I)) {
         return buildExpression(Operand);
     }
-    // Load the named operand
-    return buildLoad(Operand);
-}
-
-
-
-// Load the variable the given operand was
-// assigned to.
-// FIXME: inline
-SExpr* ALFTranslator::buildLoad(Value* Operand) {
-    return ACtx->load(getBitWidth(Operand->getType()),getValueName(Operand));
+    // Load the named operand (for value types), or return
+    // an address referencing the operand (for composite types)
+    if(isScalarValueType(Operand->getType())) {
+        return ACtx->load(getBitWidth(Operand->getType()),getValueName(Operand));
+    } else {
+        return ACtx->address(getValueName(Operand), 0);
+    }
 }
 
 void ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
@@ -1583,7 +1661,12 @@ SExpr* ALFTranslator::buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*,
 }
 
 /// Pointer arithmetic: add/subtract the given offset (in bits) to/from the operand
+/// In order to simplify the resulting ALF files, we first check whether the
+/// operand expression is a literal address.
 SExpr* ALFTranslator::buildPointer(SExpr *OpExpr, int64_t Offset) {
+    if(ALFAddressExpr* Addr = dyn_cast<ALFAddressExpr>(OpExpr)) {
+        return Addr->withOffset(Offset);
+    }
     unsigned BitWidth = ACtx->getConfig()->getBitsFRef();
     if(Offset == 0)
         return OpExpr;
@@ -1728,7 +1811,36 @@ void ALFTranslator::setCurrentInstruction(Instruction *I, unsigned Index) {
     CurrentInstruction = I;
     CurrentInsIndex = Index;
     CurrentInsCounter = 0;
+    addMapping(I);
 }
+
+void ALFTranslator::addMapping(Instruction *I) {
+    std::string File, Function;
+    int Line, Col;
+    if(getDebugLocation(I,File,Line,Col)) {
+        std::string Label;
+        if(CurrentBlock->empty()) {
+            Builder.addMapping(getBasicBlockLabel(I->getParent()), File + ";" + utostr(Line) + ";" + utostr(Col));
+        }
+        Builder.addMapping(getInstructionLabel(I->getParent(),CurrentInsIndex), File + ";" + utostr(Line) + ";" + utostr(Col));
+    }
+}
+
+bool ALFTranslator::getDebugLocation(Instruction *I, std::string& File, int &Line, int &Col) {
+    DebugLoc Loc = I->getDebugLoc();
+    DISubprogram SubProgram;
+    if(MDNode* Scope = Loc.getScope(I->getContext())) {
+        SubProgram = getDISubprogram(Scope);
+        if(SubProgram.Verify()) {
+            File = SubProgram.getFilename().str();
+            Line = Loc.getLine();
+            Col  = Loc.getCol();
+            return true;
+        }
+    }
+    return false;
+}
+
 
 void ALFTranslator::setCurrentInstruction(const std::string& TempBlockLabel) {
     CurrentHelperBlock  = new std::string(TempBlockLabel);
@@ -1761,6 +1873,18 @@ int64_t ALFTranslator::getBitOffset(CompositeType* Ty, int64_t Index) {
 	} else {
 		alf_fatal_error("getBitOffset: CompositeType which is neither struct nor sequential", *Ty);
 	}
+}
+
+int64_t ALFTranslator::getBitOffset(CompositeType *Ty, ArrayRef<unsigned> Indices)
+{
+    int64_t BitOffset = 0;
+    Type *OpTy = Ty;
+    for (ArrayRef<unsigned>::iterator I = Indices.begin(), E = Indices.end(); I!=E; ++I) {
+        CompositeType *Agg = cast<CompositeType>(OpTy);
+        BitOffset += getBitOffset(Agg, *I);
+        OpTy = Agg->getTypeAtIndex(*I);
+    }
+    return BitOffset;
 }
 
 std::pair<Value*, int64_t> ALFTranslator::getBitOffset(CompositeType* Ty, Value* Index) {

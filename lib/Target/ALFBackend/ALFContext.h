@@ -66,6 +66,8 @@ public:
     /// Get Least Addressable Unit
     unsigned getLAU() { return LeastAddrUnit; }
 };
+// forward declaration
+class ALFAddressExpr;
 
 /// Context for creating ALF expressions
 class ALFContext : public SExprContext {
@@ -89,6 +91,14 @@ public:
     /// decimal value
     SExpr* dec_unsigned(unsigned BitWidth, uint64_t Value) {
         return list("dec_unsigned")->append(BitWidth)->append(Value);
+    }
+    /// decimal value (signed)
+    SExpr* dec_signed(unsigned BitWidth, int64_t Value) {
+        if(Value < 0) {
+            return list("dec_signed")->append(BitWidth)->append(list("minus")->append(-Value));
+        } else {
+            return list("dec_signed")->append(BitWidth)->append(Value);
+        }
     }
     /// float value
     SExpr* float_val(unsigned ExpBitWidth, unsigned FracBitWidth, const APFloat& Value) {
@@ -119,17 +129,13 @@ public:
     /// identifier
     SExpr* identifier(const Twine& Name);
 
+    ALFAddressExpr* address(const Twine& Name, uint64_t OffsetInBits = 0);
 
-    // FIXME: should be StringRef
-    SExpr* address(const Twine& Name, uint64_t OffsetInBits = 0) {
-        return list("addr")->append(Config->getBitsFRef())
-                            ->append(fref(Twine(Name)))
-                            ->append(offset(OffsetInBits));
-    }
     SExpr* fref(const Twine& Name) {
         return list("fref")->append(Config->getBitsFRef())
                             ->append(identifier(Twine(Name)));
     }
+
     SExpr* lref(const Twine& Name) {
         return list("lref")->append(Config->getBitsLRef())
                             ->append(identifier(Twine(Name)));
@@ -167,9 +173,8 @@ public:
     SExpr* load(unsigned BitWidth, SExpr* ref) {
         return list("load")->append(BitWidth)->append(ref);
     }
-    SExpr* load(unsigned BitWidth, const Twine& Fref, unsigned Offset = 0) {
-        return list("load")->append(BitWidth)->append(address(Fref,Offset));
-    }
+    SExpr* load(unsigned BitWidth, const Twine& Fref, unsigned Offset = 0);
+
     SExpr* null() {
         return list("null");
     }
@@ -187,6 +192,38 @@ public:
                              ->append(lref(Twine(Id)))
                              ->append(offset(Offset));
     }
+};
+
+enum ALFSExprTypes { GenericSExpr = 0, ALFAddressSExpr = 1, ALFBegin = ALFAddressSExpr, ALFEnd = ALFAddressSExpr };
+
+/// ALF specific s-expression representing an address
+class ALFAddressExpr : public SExprList {
+    std::string Name;
+    uint64_t OffsetInBits;
+public:
+    ALFAddressExpr(ALFContext *Ctx, const Twine& name, uint64_t offsetInBits) :
+        SExprList(Ctx), Name(name.str()), OffsetInBits(offsetInBits) {
+        append("addr");
+        append(Ctx->getConfig()->getBitsFRef());
+        append(Ctx->fref(Twine(name)));
+        append(Ctx->offset(offsetInBits));
+    }
+    virtual ~ALFAddressExpr() {}
+
+    ALFAddressExpr *withOffset(uint64_t AdditionalOffset) {
+        return ((ALFContext*)getContext())->address(Twine(Name), OffsetInBits + AdditionalOffset);
+    }
+    /// support for isa<> and friends
+    virtual unsigned getValueID() const {
+        return ALFAddressSExpr;
+    }
+    static inline bool classof(const ALFAddressExpr *) {
+        return true;
+    }
+    static inline bool classof(const SExpr *V) {
+        return V->getValueID() == ALFAddressSExpr;
+    }
+
 };
 
 } // end namespace alf
