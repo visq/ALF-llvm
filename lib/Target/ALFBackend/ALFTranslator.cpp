@@ -1,3 +1,4 @@
+
 //===-- ALFTranslator.cpp - Library for converting LLVM code to ALF (Artist2 Language for Flow Analysis) --------------===//
 //
 //                     Benedikt Huber, <benedikt@vmars.tuwien.ac.at>
@@ -217,8 +218,9 @@ void ALFTranslator::addStatement(SExpr *Code) {
     std::string StatementLabel = getInstructionLabel(CurrentInstruction->getParent(), CurrentInsIndex);
     if(CurrentHelperBlock)
         StatementLabel += "::" + *CurrentHelperBlock;
-    if(CurrentInsCounter > 0)
-        StatementLabel += "::" + utostr(CurrentInsCounter);
+    if(CurrentInsCounter > 0) {
+        StatementLabel += ":::" + utostr(CurrentInsCounter);
+    }
     bool IsFirst = !CurrentHelperBlock && CurrentInsCounter == 0;
     CurrentBlock->addStatement(StatementLabel,
                                IsFirst ? getStatementComment(*CurrentInstruction, CurrentInsIndex) : "",
@@ -528,6 +530,8 @@ bool ALFTranslator::isExpressionInst(const Instruction &I) {
         || isa<VAArgInst>(I)) {
         return false;
     }
+    if(! isScalarValueType(I.getType()) && isa<LoadInst>(I))
+      return false;
 #ifndef ENABLE_SELECT_EXPRESSIONS
     if(isa<SelectInst>(I)) return false;
 #endif
@@ -667,6 +671,7 @@ void ALFTranslator::visitStoreInst(StoreInst &I) {
     SExpr *LHS = buildOperand(I.getPointerOperand());
     SExpr *RHS = buildOperand(I.getOperand(0));
     assert(! isExpressionInst(I) && "StoreInst should be a statement, not an expression");
+    // TODO: addCopyStatements(I.getType(), LHS, RHS, 0, false);
     addStatement(ACtx->store(LHS,RHS));
 }
 
@@ -805,9 +810,9 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
           ->append(buildOperand(I.getTrueValue()))
           ->append(buildOperand(I.getFalseValue()));
 #else
-  std::string ThenLabel = getInstructionLabel(I.getParent(), CurrentInsIndex, "then");
-  std::string ElseLabel = getInstructionLabel(I.getParent(), CurrentInsIndex, "else");
-  std::string JoinLabel = getInstructionLabel(I.getParent(), CurrentInsIndex, "join");
+  std::string ThenLabel = getInstructionLabel(I.getParent(), CurrentInsIndex, ":then");
+  std::string ElseLabel = getInstructionLabel(I.getParent(), CurrentInsIndex, ":else");
+  std::string JoinLabel = getInstructionLabel(I.getParent(), CurrentInsIndex, ":join");
 
   SExprList *Switch = ACtx->list("switch");
   SExpr *Cond = buildOperand(I.getCondition());
@@ -823,14 +828,14 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
   // then and else branch
   for(int Branch = 0; Branch < 2; Branch++) {
       // store true/false value
-      setCurrentInstruction(Branch == 0 ? "then" : "else");
+      setCurrentInstruction(Branch == 0 ? ":then" : ":else");
       SExpr *Val = buildOperand((Branch == 0) ? I.getTrueValue() : I.getFalseValue());
       SExpr *Store = ACtx->store(ACtx->address(getValueName(&I)),Val);
       addStatement(Store);
       addStatement(ACtx->jump(JoinLabel));
   }
   // join block
-  setCurrentInstruction("join");
+  setCurrentInstruction(":join");
   addStatement(ACtx->null());
 #endif
 }
@@ -1075,8 +1080,9 @@ void ALFTranslator::visitGetElementPtrInst(GetElementPtrInst &GepIns) {
 /// Load a value from a frame, if it is of scalar value type.
 /// For volatile types, return a load from or a reference to
 /// a volatile frame of the right size.
-/// For non-scalar types, copy all values, and return a reference
-/// to the value.
+/// For non-scalar types, this is a statement instruction (not an
+/// expression instruction); it copies all values using
+/// multiple load/store pairs.
 /// FIXME: alignment issues are ignored for now
 void ALFTranslator::visitLoadInst(LoadInst &I) {
   SExpr *OpExpr = buildOperand(I.getOperand(0));
@@ -1085,11 +1091,11 @@ void ALFTranslator::visitLoadInst(LoadInst &I) {
   bool VolatileAccess = I.isVolatile() && ! IgnoreVolatiles;
   if(isScalarValueType(ResultTy)) {
       Expr = loadScalar(ResultTy, OpExpr, VolatileAccess);
+      setVisitorResult(I,Expr);
   }  else {
       addCopyStatements(ResultTy, OpExpr, getValueName(&I), 0, VolatileAccess);
-      Expr = ACtx->address(getValueName(&I), 0);
+      return;
   }
-  setVisitorResult(I,Expr);
 }
 
 SExpr* ALFTranslator::loadScalar(Type *Ty, SExpr *SrcExpr, bool VolatileAccess) {
@@ -1102,18 +1108,18 @@ SExpr* ALFTranslator::loadScalar(Type *Ty, SExpr *SrcExpr, bool VolatileAccess) 
     }
 }
 
-void ALFTranslator::addCopyStatements(Type *Ty, SExpr *SrcExpr, const Twine& DstName, uint64_t Offset, bool VolatileAccess) {
-    if(isScalarValueType(Ty)) {
-        SExpr *LoadExpr = loadScalar(Ty, buildPointer(SrcExpr, Offset), VolatileAccess);
+void ALFTranslator::addCopyStatements(Type *DstTy, SExpr *SrcExpr, const Twine& DstName, uint64_t Offset, bool VolatileAccess) {
+    if(isScalarValueType(DstTy)) {
+        SExpr *LoadExpr = loadScalar(DstTy, buildPointer(SrcExpr, Offset), VolatileAccess);
         addStatement(ACtx->store(ACtx->address(DstName, Offset), LoadExpr));
         return;
     }
-    if(StructType *STy = dyn_cast<StructType>(Ty)) {
+    if(StructType *STy = dyn_cast<StructType>(DstTy)) {
         unsigned Ix = 0;
         for(StructType::element_iterator I = STy->element_begin(), E = STy->element_end(); I!=E; ++I, ++Ix) {
             addCopyStatements(*I, SrcExpr, Twine(DstName), Offset+getBitOffset(STy,Ix), VolatileAccess);
         }
-    } else if(ArrayType *ArrTy = dyn_cast<ArrayType>(Ty)) {
+    } else if(ArrayType *ArrTy = dyn_cast<ArrayType>(DstTy)) {
         for(unsigned Ix = 0; Ix < ArrTy->getNumElements(); ++Ix) {
             addCopyStatements(ArrTy->getElementType(), SrcExpr, Twine(DstName), Offset+getBitOffset(ArrTy,Ix), VolatileAccess);
         }
@@ -1281,33 +1287,30 @@ void ALFTranslator::addSwitch(TerminatorInst& SI,
 	  for(CaseVector::const_iterator I = Cases.begin(), E = Cases.end(); I!=E; ++I) {
 	        SExprList *Target = ACtx->list("target")
 	                                ->append(buildOperand(I->first));
-		    /*emitOperand()*/(void)buildOperand(I->first);
-		    if(isa<PHINode>(I->second->begin())) {
-		        /* need to set phi variables on the edge */
-		        Target->append(ACtx->labelRef(getInstructionLabel(BB, CurrentInsIndex, "edge::" + utostr(EdgeBlocks.size()))));
-				EdgeBlocks.insert(I->second);
-		    } else {
-                Target->append(ACtx->labelRef(getBasicBlockLabel(I->second)));
-		    }
-		    Code->append(Target);
+		if(isa<PHINode>(I->second->begin())) {
+		  /* need to set phi variables on the edge */
+		  Target->append(ACtx->labelRef(getInstructionLabel(BB, CurrentInsIndex, getBasicBlockLabel(I->second))));
+		  EdgeBlocks.insert(I->second);
+		} else {
+		  Target->append(ACtx->labelRef(getBasicBlockLabel(I->second)));
+		}
+		Code->append(Target);
 	  }
 	  SExprList *DefBranch = ACtx->list("default");
-	  if(isa<PHINode>(DefaultCase->begin())) { /* need to set phi variables on the edge */
-          /* need to set phi variables on the edge */
-		  DefBranch->append(ACtx->labelRef(getInstructionLabel(BB, CurrentInsIndex, "edge::" + utostr(EdgeBlocks.size()))));
-          EdgeBlocks.insert(DefaultCase);
+	  if(isa<PHINode>(DefaultCase->begin())) {
+	    /* need to set phi variables on the edge */
+	    DefBranch->append(ACtx->labelRef(getInstructionLabel(BB, CurrentInsIndex, getBasicBlockLabel(DefaultCase))));
+	    EdgeBlocks.insert(DefaultCase);
 	  } else {
-	      DefBranch->append(ACtx->labelRef(getBasicBlockLabel(DefaultCase)));
+	    DefBranch->append(ACtx->labelRef(getBasicBlockLabel(DefaultCase)));
 	  }
 	  Code->append(DefBranch);
 	  addStatement(Code);
 
 	  // Insert basic blocks to set phi copies (one for each succ with phi nodes)
-	  unsigned Ix = 0;
-	  for(std::set<BasicBlock*>::const_iterator I = EdgeBlocks.begin(), E = EdgeBlocks.end();
-			  I!=E; ++I, ++Ix) {
+	  for(std::set<BasicBlock*>::const_iterator I = EdgeBlocks.begin(), E = EdgeBlocks.end(); I!=E; ++I) {
 		  BasicBlock* Succ = *I;
-		  setCurrentInstruction("edge::" + utostr(Ix));
+		  setCurrentInstruction(getBasicBlockLabel(Succ));
 		  addUnconditionalJump(BB, Succ);
 	  }
 }
@@ -1378,11 +1381,11 @@ std::auto_ptr<ALFConstant> ALFTranslator::foldConstant(const Constant* Const) {
 			}
 		}
 		if(mem_areas_begin() == mem_areas_end()) {
-			// no memory areas specified, use default catch-all
-			return std::auto_ptr<ALFConstant>( new ALFConstAddress(false, ABS_REF, AbsAddress * LeastAddrUnit) );
+		  // no memory areas specified, use default catch-all
+		  return std::auto_ptr<ALFConstant>( new ALFConstAddress(false, ABS_REF, AbsAddress * LeastAddrUnit) );
 		} else {
-			alf_warning("foldConstant: invalid absolute address (not specified on the command line): " + AbsAddress);
-			return std::auto_ptr<ALFConstant>( 0 );
+		  alf_warning("foldConstant: invalid absolute address (not specified on the command line): " + utostr(AbsAddress));
+		  return std::auto_ptr<ALFConstant>( 0 );
 		}
 
     } else if(CE && CE->getNumOperands() == 1) {
@@ -1705,14 +1708,16 @@ std::string ALFTranslator::getValueName(const Value *Operand) {
   return "%"+Name;
 }
 
-std::string ALFTranslator::getBasicBlockLabel(const BasicBlock* BB) {
-  std::string name;
-  if(! BB->hasName()) {
-	  name = getAnonValueName(BB);
+std::string ALFTranslator::getBlockName(const BasicBlock *BB) {
+ if(! BB->hasName()) {
+	  return getAnonValueName(BB);
   } else {
-	  name = BB->getName().str();
+	  return BB->getName().str();
   }
-  return BB->getParent()->getName().str() + "::" + name;
+}
+
+std::string ALFTranslator::getBasicBlockLabel(const BasicBlock* BB) {
+  return BB->getParent()->getName().str() + "::" + getBlockName(BB);
 }
 
 void ALFTranslator::setCurrentInstruction(Instruction *I, unsigned Index) {

@@ -152,3 +152,44 @@ you need a C frontend for LLVM, such as clang or dragonegg.
 
     # [llvm/test/CodeGen/ALF/harness] analyze using sweet (single path mode)
     sweet -i=array.alf func=main -ae ffg=ub vola=t pu css -f co
+
+Identifier Mapping
+------------------
+
+The LLVM->ALF translator uses a predictable naming scheme for ALF labels,
+which makes it easy to interpret the resulting flow facts with respect to
+the bitcode. Below we describe the translation of labels, where
+
+    alf-name = T(llvm-name)
+
+* LLVM Function func-name
+
+  In ALF: The label for function func-name
+  T(func-name) = "func-name"
+
+* LLVM Basic Block block-name in function func-name
+
+  In ALF: The first label in the single-entry ALF region corresponding to
+          the basic block
+  T(block-name,func-name) = "func-name::block-name"
+
+* i^th LLVM instruction in a basic block
+  
+  In ALF: The first label in the single-entry ALF region corresponding
+          to the instruction
+  T(i, block-name, func-name) = "func-name::block-name::i"
+
+* Edges from branch instruction f:bb:i to successor succ-block'
+
+  T(succ-block,i,block-name,func-name) = "func-name::block-name::i::succ-block"
+
+* Internal ALF basic blocks and internal (j>1)^th ALF statement
+  (used to translate complex LLVM instructions with no 1-1 correspondence)
+
+  T(j, llvm-part)               = "${T(llvm-part)}:::j"
+  T(j, branch-label, llvm-part) = "${T(llvm-part)}:::branch-label:::j"
+
+Summarizing: The LLVM part and the ALF-internal part is separated by :::. The
+LLVM part consists of up to 4 parts separated by :: (function,block,instruction, 
+edge). The first label corresponding to a LLVM block and LLVM instruction do not 
+have an internal part, and consist of two and three LLVM parts, respectively.
