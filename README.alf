@@ -31,14 +31,14 @@ You need git (the version control system).
     # [llvm/] add remote to our developer repo (if you are registered)
     #   Also see https://forge.vmars.tuwien.ac.at/projects/otap-llvm
     # Developer setup
-    #  (a) Visit https://forge.vmars.tuwien.ac.at/my/public_keys
-    #  (b) Create a new key
-    #  (c) Try 'ssh gitosis@forge.vmars.tuwien.ac.at'
-    #    There must NOT be a password prompt, only the error message:
-    #    ERROR:gitosis.serve.main:Need SSH_ORIGINAL_COMMAND in environment
+    #  (a) Visit https://forge.vmars.tuwien.ac.at/my/account
+    #  (b) Create a new public key
+    #  (c) Try 'ssh gitolite@forge.vmars.tuwien.ac.at'
+    #    There must NOT be a password prompt, only information on the
+    #    set of repositories you have access to
     #
     git remote rename forge forge-read-only
-    git remote add forge gitosis@forge.vmars.tuwien.ac.at:otap-llvm.git
+    git remote add forge gitolite@forge.vmars.tuwien.ac.at:wcet/wcet-framework/otap-llvm.git
 
     # [llvm/] fetch forge repository
     git fetch forge
