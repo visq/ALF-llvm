@@ -1,4 +1,4 @@
-//===-- ALFBackendTargetInfo.cpp - ALFBackend Target Implementation -----------===//
+//===-- ALFBackendTargetInfo.cpp - ALFBackend Target Implementation -------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -14,8 +14,15 @@ using namespace llvm;
 
 Target llvm::TheALFBackendTarget;
 
-extern "C" void LLVMInitializeALFBackendTargetInfo() { 
-  RegisterTarget<> X(TheALFBackendTarget, "alf", "ALF backend");
+static unsigned ALFBackend_TripleMatchQuality(const std::string &TT) {
+  // This backend always works, but shouldn't be the default in most cases.
+  return 1;
+}
+
+extern "C" void LLVMInitializeALFBackendTargetInfo() {
+  TargetRegistry::RegisterTarget(TheALFBackendTarget, "alf",
+                                  "ALF backend",
+                                  &ALFBackend_TripleMatchQuality);
 }
 
 extern "C" void LLVMInitializeALFBackendTargetMC() {}
