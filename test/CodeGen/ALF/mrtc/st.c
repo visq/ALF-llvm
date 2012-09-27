@@ -2,7 +2,7 @@
 
 /* 2011/10/18, Benedikt Huber <benedikt@vmars.tuwien.ac.at>
  * Changes:
- *  - Measurement and Printing the Results is only enabled if the DEBUG flag is set
+ *  - Measurement and Printing the Results is only enabled if the POUT flag is set
  *  - Added Prototypes for InitSeed and RandomInteger
  *  - Changed return type of InitSeed from 'missing (default int)' to 'void'
  */
@@ -14,8 +14,6 @@
 
 #define MAX 1000
 
-/* 2011/10/18, Benedikt Huber <benedikt@vmars.tuwien.ac.at> */
-/* Prototypes */
 void InitSeed(void);
 int RandomInteger();
 
@@ -31,9 +29,9 @@ double ArrayA[MAX], ArrayB[MAX];
 double SumA, SumB;
 double Coef;
 
-main ()
+int main ()
 {
-#ifdef DEBUG
+#ifdef POUT
    long StartTime, StopTime;
    float TotalTime;
 #endif
@@ -44,7 +42,7 @@ main ()
    void Calc_LinCorrCoef();
 
    InitSeed ();
-#ifdef DEBUG
+#ifdef POUT
    printf ("\n   *** Statictics TEST ***\n\n");
    StartTime = ttime();
 #endif
@@ -62,7 +60,7 @@ main ()
    */
    Calc_LinCorrCoef(ArrayA, ArrayB, MeanA, MeanB /*, &Coef*/);
 
-#ifdef DEBUG
+#ifdef POUT
    StopTime = ttime();
    TotalTime = (StopTime - StartTime) / 1000.0;
    printf("     Sum A = %12.4f,      Sum B = %12.4f\n", SumA, SumB);
@@ -73,9 +71,6 @@ main ()
 #endif
 }
 
-
-/* 2011/10/18, Benedikt Huber <benedikt@vmars.tuwien.ac.at> */
-/* Return type should be void */
 
 void InitSeed ()
 /*

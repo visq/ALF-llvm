@@ -18,7 +18,11 @@ double		x1, x2, x3, x4, x, y, z, t, t1, t2;
 double 		e1[4];
 int		i, j, k, l, n1, n2, n3, n4, n6, n7, n8, n9, n10, n11;
 
-main()
+int pa();
+int p3();
+int p0();
+
+int main()
 {
 
 	/* initialize constants */
@@ -186,7 +190,7 @@ main()
 #endif
 }
 
-pa(e)
+int pa(e)
 double e[4];
 {
 	register int j;
@@ -204,7 +208,7 @@ double e[4];
 }
 
 
-p3(x, y, z)
+int p3(x, y, z)
 double x, y, *z;
 {
 	x  = t * (x + y);
@@ -214,7 +218,7 @@ double x, y, *z;
 }
 
 
-p0()
+int p0()
 {
 	e1[j] = e1[k];
 	e1[k] = e1[l];
