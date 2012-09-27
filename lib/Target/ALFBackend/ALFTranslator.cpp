@@ -232,9 +232,10 @@ void ALFTranslator::processFunctionSignature(const Function *F, ALFFunction *AF)
         const AttrListPtr &PAL = F->getAttributes();
         unsigned Idx = 1;
         for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E; ++I) {
-            if (PAL.paramHasAttr(Idx, Attribute::ByVal)) {
-                alf_warning("Attribute::ByVal ignored" + typeToString(*FT));
-            }
+            // see: http://bugzilla.mdh.se/bugzilla/show_bug.cgi?id=292
+            // if (PAL.paramHasAttr(Idx, Attribute::ByVal)) {
+            //    alf_warning("Attribute::ByVal ignored; type = " + typeToString(*FT));
+            // }
             AF->addFormal(getValueName(I), getBitWidth(I->getType()));
             ++Idx;
         }
@@ -778,8 +779,8 @@ void ALFTranslator::visitCallInst(CallInst &I) {
     if (I.paramHasAttr(ArgNo+1, Attribute::ByVal)) {
         // This has no direct consequence for ALF code generation, but may lead
         // to problems when a caller uses the C interface
-        alf_warning("Pointer argument was declared as ByVal parameter of "
-                    "type " + typeToString(*(*AI)->getType()));
+        // Unfortunately, there is no way to circumvent this problem, and it
+        // is not always detectable (http://bugzilla.mdh.se/bugzilla/show_bug.cgi?id=292)
     }
     Call->append(buildOperand(*AI));
   }
