@@ -6,3 +6,5 @@ add_llvm_target(
   ALFTranslator.cpp
   SExpr.cpp
   )
+
+add_subdirectory(TargetInfo)
