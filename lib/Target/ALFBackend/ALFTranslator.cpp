@@ -990,8 +990,8 @@ void ALFTranslator::visitBinaryOperator(Instruction &I) {
          *   (b) ptrtoint[p2] - ptrtoint[p1] ==> lauToBytes[sub p2 p1]
          *   (c) ptrtoint[p] +- i ==> add p bytesToLau[i]
          */
+        __attribute__((unused)) bool IsPointerOperand[2] = { false, false };
         Value *Ops[2];
-        bool IsPointerOperand[2] = { false, false };
         for(int OpIx = 0; OpIx < 2; ++OpIx) {
             Ops[OpIx] = I.getOperand(OpIx);
             if(PtrToIntInst* SubOp = dyn_cast<PtrToIntInst>(Ops[OpIx])) {
@@ -1698,7 +1698,7 @@ SExpr* ALFTranslator::buildMultiplication(unsigned ResultBitWidth, Value* Op1, V
                  ->append(buildOperand(Op2));
   return ACtx->list("select")
             ->append(BitWidth1 + BitWidth2)
-            ->append(0ULL)
+            ->append((uint64_t)0)
             ->append(ResultBitWidth - 1)
             ->append(Mul);
 }
@@ -1709,7 +1709,7 @@ SExpr* ALFTranslator::buildIntCast(Value* Operand, unsigned BitWidthSrc, unsigne
   if(BitWidthSrc > BitWidthDst) { // truncate
     return ACtx->list("select")
               ->append(BitWidthSrc)
-              ->append(0ULL)
+              ->append((uint64_t)0)
               ->append(BitWidthDst - 1)
               ->append(OpExpr);
   } else if(BitWidthSrc < BitWidthDst) {
