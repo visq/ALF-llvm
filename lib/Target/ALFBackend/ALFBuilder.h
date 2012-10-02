@@ -112,10 +112,11 @@ public:
             delete *I;
         }
     }
-    void addStatement(const Twine& Label, const Twine& Comment, SExpr* Code) {
+    ALFStatement* addStatement(const Twine& Label, const Twine& Comment, SExpr* Code) {
         Code->setInline(false);
         ALFStatement *Statement = new ALFStatement(Label, Comment, Code);
         Statements.push_back(Statement);
+        return Statement;
     }
     bool empty() {
         return Statements.empty();
