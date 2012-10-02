@@ -312,7 +312,7 @@ void ALFBackend::processFunctionImports(Module &M) {
     }
 }
 
-// Global variables (import or definition/export)\
+// Global variables (import or definition/export)
 // TODO: We should consider special linkage information, such as:
 //   ==> thread Local, hidden visibility, link once, weak, external weak, common linkage
 // TODO: const == read-only? (currently ignored)

@@ -221,10 +221,7 @@ namespace llvm {
     void processFunctionSignature(const Function *F, ALFFunction *AF);
 
     /// add a statement to the current block
-    void addStatement(SExpr *Code);
-
-    /// add specially labeled statement to the current block
-    void addStatement(SExpr *Code, const Twine& Label);
+    ALFStatement* addStatement(SExpr *Code);
 
     /// set the result of a instruction visitor for 'expression' instructions
     void setVisitorResult(const Instruction& Ins, SExpr *Expr) {
@@ -350,7 +347,7 @@ namespace llvm {
     bool isInlinableInst(const Instruction &I);
 
     /// Add statements for an unconditional jump
-    void addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ);
+    ALFStatement* addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ);
 
     /// Add statements for a conditional branch or switch instruction
     void addSwitch(TerminatorInst& SI, Value* Condition, const CaseVector& Cases, BasicBlock* DefaultCase);
@@ -452,7 +449,7 @@ namespace llvm {
     void addCopyStatements(Type *Ty, SExpr *SrcExpr, SExpr *DstExpr, bool VolatileAccess = false, uint64_t Offset = 0);
 
     /// add a source code mapping for an instruction
-    void addMapping(Instruction *I);
+    void addMapping(const StringRef Label, Instruction *I);
 
     /// get source code location corresponding to an instruction (if available)
     bool getDebugLocation(Instruction *I, std::string& File, int &Line, int &Col);

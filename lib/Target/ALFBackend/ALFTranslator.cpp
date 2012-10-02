@@ -132,15 +132,14 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
     // add arguments
     processFunctionSignature(F, AF);
 
-    // Declare local variables for storing instruction results
+    // Declare local variables for storing instruction results. We need local variables for:
+    //  - Non-inlineable instructions
+    //  - PHI nodes
+    //  - The condition of branch and switch statements
+    //  - Stack allocated memory, if size is known at compile time
     unsigned ReturnInstructionCount = 0;
     for (const_inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
 
-        // We need local variables for:
-        //  - PHI nodes
-        //  - non-inlineable instructions
-        //  - The condition of branch and switch statements
-        //  - Alloca memory with fixed size
         if(isa<PHINode>(*I)) {
             AF->addLocal(getValueName(&*I), getBitWidth(I->getType()), "Local Variable (PHI node)");
         } else if (I->getType() != Type::getVoidTy(F->getContext()) && !isInlinableInst(*I)) {
@@ -148,16 +147,17 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
         } else if (const AllocaInst *AI = isStaticSizeAlloca(&*I)) {
             const ConstantInt* ArraySize = cast<ConstantInt>(AI->getArraySize());
             Type* ElTy = AI->getType()->getElementType();
-            AF->addLocal(getValueName(AI), getBitWidth(ElTy) * ArraySize->getLimitedValue(), "alloca'd memory");
+            AF->addLocal(getValueName(AI), getBitWidth(ElTy) * ArraySize->getLimitedValue(), "Alloca'd memory");
         }
 
-        // Get information needed for additional locals
+        // Count the number of return instructions, to add an additional basic block as unique exit node
         if(isa<ReturnInst>(*I)) {
             ReturnInstructionCount++;
         }
     }
 
-    // add (unique, additional) exit basic block if necessary
+    // Add (unique, additional) exit basic block if necessary
+    // FIXME: we cannot generate sensible mapping info for this BB
     if(ReturnInstructionCount > 1) {
         AF->addLocal(RETURN_VALUE_REF, getBitWidth(F->getReturnType()), "return value");
         AF->setMultiExit(true);
@@ -169,9 +169,10 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
     for (Function::const_iterator BB = F->begin(), E = F->end(); BB != E; ++BB) {
         processBasicBlock(BB, AF);
     }
+
     // add return block for multi-exit functions
     if(AF->isMultiExit()) {
-        CurrentBlock = AF->addBasicBlock(F->getName()+"::"+RETURN_VALUE_LABEL_SUFFIX,"Exit block");
+        CurrentBlock = AF->addBasicBlock(F->getName()+"::"+RETURN_VALUE_LABEL_SUFFIX, "Exit block");
         SExpr *RetExpr;
         if(F->getReturnType()->isVoidTy()) {
             RetExpr = ACtx->ret();
@@ -180,7 +181,7 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
         }
         CurrentBlock->addStatement(F->getName()+"::"+RETURN_VALUE_LABEL_SUFFIX+"::0", "return statement", RetExpr);
     }
-    // XXX: Support struct returns
+    // TODO: Support struct returns
     bool isStructReturn = F->hasStructRetAttr();
 
 
@@ -229,11 +230,10 @@ void ALFTranslator::processFunctionSignature(const Function *F, ALFFunction *AF)
     if (FT->isVarArg()) {
         alf_fatal_error("processFunctionSignature(): variable argument lists are not supported", F);
     } else if (! F->arg_empty()) {
-        const AttrListPtr &PAL = F->getAttributes();
         unsigned Idx = 1;
         for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E; ++I) {
             // see: http://bugzilla.mdh.se/bugzilla/show_bug.cgi?id=292
-            // if (PAL.paramHasAttr(Idx, Attribute::ByVal)) {
+            // if (F->getAttributes().paramHasAttr(Idx, Attribute::ByVal)) {
             //    alf_warning("Attribute::ByVal ignored; type = " + typeToString(*FT));
             // }
             AF->addFormal(getValueName(I), getBitWidth(I->getType()));
@@ -241,6 +241,7 @@ void ALFTranslator::processFunctionSignature(const Function *F, ALFFunction *AF)
         }
     }
 }
+
 // FIXME: BBconst is morally const, but our interfaces do not match
 void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *ACtx) {
     BasicBlock *BB = const_cast<BasicBlock*>(BBconst);
@@ -256,11 +257,12 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
         setCurrentInstruction(II, Index);
         if(isExpressionInst(*II)) {
             // Store the value of the instruction in a temporary
-            // ALF variable. Directly *ACtxter* the store, the value
+            // ALF variable. Directly *after* the store, the value
             // of emitLoad(I) is equivalent to emitExpression(I)
             SExpr *Store = ACtx->store(ACtx->address(getValueName(&*II)), buildExpression(&*II));
-            addStatement(Store);
+            (void) addStatement(Store);
         } else {
+            // Visit the statement instruction II
             visit(*II);
         }
 
@@ -269,7 +271,8 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
 
 
 /// Add an ALF statement for the current LLVM instruction in the current statement block
-void ALFTranslator::addStatement(SExpr *Code) {
+/// This function returns the label of the generated ALF Statement
+ALFStatement* ALFTranslator::addStatement(SExpr *Code) {
     std::string StatementLabel = getInstructionLabel(CurrentInstruction->getParent(), CurrentInsIndex);
     if(CurrentHelperBlock)
         StatementLabel += "::" + *CurrentHelperBlock;
@@ -277,10 +280,10 @@ void ALFTranslator::addStatement(SExpr *Code) {
         StatementLabel += ":::" + utostr(CurrentInsCounter);
     }
     bool IsFirst = !CurrentHelperBlock && CurrentInsCounter == 0;
-    CurrentBlock->addStatement(StatementLabel,
-                               IsFirst ? getStatementComment(*CurrentInstruction, CurrentInsIndex) : "",
-                               Code);
+    ALFStatement *Stmt = CurrentBlock->addStatement(StatementLabel,
+            IsFirst ? getStatementComment(*CurrentInstruction, CurrentInsIndex) : "", Code);
     CurrentInsCounter++;
+    return Stmt;
 }
 
 /// Build a comment describing a statement
@@ -642,6 +645,8 @@ bool ALFTranslator::isInlinableInst(const Instruction &I) {
 //                        ALF Statement visitors
 //===----------------------------------------------------------------------===//
 
+/// ReturnInstruction: add a return statement, or if this is a multi-exit function,
+/// a store to the return value temporary and a jump to the unique exit block.
 void ALFTranslator::visitReturnInst(ReturnInst &I) {
 
   // TODO: struct return
@@ -669,6 +674,7 @@ void ALFTranslator::visitReturnInst(ReturnInst &I) {
   assert(! isExpressionInst(I) && "ReturnInst should be a statement, not an expression");
 }
 
+/// SwitchInst: Add a switch statement or, if there is only one case, an unconditional jump
 void ALFTranslator::visitSwitchInst(SwitchInst &SI) {
 
     assert(! isExpressionInst(SI) && "SwitchInst should be a statement, not an expression");
@@ -687,47 +693,52 @@ void ALFTranslator::visitSwitchInst(SwitchInst &SI) {
 	}
 }
 
-// Emit ALF code for a Branch Instruction
+/// BranchInst: Add a switch statement or, if this is an unconditional branch, a jump
 void ALFTranslator::visitBranchInst(BranchInst &I) {
 
     assert(! isExpressionInst(I) && "BranchInst should be a statement, not an expression");
-    if (I.isConditional()) {
-        Value* Condition = I.getCondition();
 
-        /* one case: true -> 0, default -> 1 */
+    if (I.isConditional()) {
+
+        // one case: true -> 0, default -> 1
         ALFTranslator::CaseVector Cases;
+        Value* Condition = I.getCondition();
         Cases.push_back(make_pair(ConstantInt::getTrue(Condition->getType()), I.getSuccessor(0)));
         addSwitch(I, Condition, Cases, I.getSuccessor(1));
 
     } else {
+
         addUnconditionalJump(I.getParent(), I.getSuccessor(0));
     }
 }
 
+/// IndirectBrInst: not yet supported (TODO)
 void ALFTranslator::visitIndirectBrInst(IndirectBrInst &IBI) {
+
     assert(! isExpressionInst(IBI) && "IndirectBrInst should be a statement, not an expression");
     alf_fatal_error("indirect branch instruction not yet supported", IBI);
 }
 
-/// add statement for UnreachableInst
+/// UnreachableInst:
 /// The unreachable instructions has undefined behavior; its intention
 /// will often be that of assert(0). As ALF is missing asserts, we
-/// currently emit a nop (which is NOT a good solution IMHO).
+/// currently emit a nop (TODO: this is not a good solution)
 void ALFTranslator::visitUnreachableInst(UnreachableInst &I) {
     assert(! isExpressionInst(I) && "UnreachableInst should be a statement, not an expression");
     addStatement(ACtx->null());
 }
 
-/// add statement for StoreInst
+/// StoreInst: store the RHS operand to the address specified by the LHS pointer operand
+///  If the type of the stored value is not scalar, generate multiple copy statements.
+///
+/// Note: In general, it is not safe to ignore volatile stores. A store to a regular
+///       variable might be marked volatile (to avoid reordering).
+///       For the purposes of flow analysis, we thus ignore the volatile attribute
 void ALFTranslator::visitStoreInst(StoreInst &I) {
-    // In general, it is not safe to ignore volatile stores. A store to a regular
-    // variable might be marked volatile (to avoid reordering).
-    // Therefore we do not consider (I.isVolatile()) to be special
 
-    // Emit LHS
+    assert(! isExpressionInst(I) && "StoreInst should be a statement, not an expression");
     SExpr *LHS = buildOperand(I.getPointerOperand());
     SExpr *RHS = buildOperand(I.getOperand(0));
-    assert(! isExpressionInst(I) && "StoreInst should be a statement, not an expression");
     if(isScalarValueType(I.getOperand(0)->getType())) {
         addStatement(ACtx->store(LHS,RHS));
     } else {
@@ -735,7 +746,7 @@ void ALFTranslator::visitStoreInst(StoreInst &I) {
     }
 }
 
-
+/// CallInst: Generate code for function calls, inline assembly or intrinsics.
 void ALFTranslator::visitCallInst(CallInst &I) {
 
   if (isa<InlineAsm>(I.getCalledValue()))
@@ -806,7 +817,6 @@ void ALFTranslator::visitCallInst(CallInst &I) {
 //  ... floating points: nan,nanf,inf,inff
 //  ... stack save, stack restore builtins
 //  ... support for 128-bit integers
-// FIXME: Port to 3.1
 bool ALFTranslator::visitBuiltinCall(CallInst &I, Intrinsic::ID ID) {
   switch(ID) {
   // do not generate code for dbg_*
@@ -852,7 +862,7 @@ bool ALFTranslator::visitBuiltinCall(CallInst &I, Intrinsic::ID ID) {
   }
 }
 
-
+/// CallInst/inline assembler: not yet supported
 void ALFTranslator::visitInlineAsm(CallInst &CI) {
     alf_fatal_error("Inline assembler not supported yet",CI);
 }
@@ -861,6 +871,9 @@ void ALFTranslator::visitInlineAsm(CallInst &CI) {
 //                        ALF Expression visitors
 //===----------------------------------------------------------------------===//
 
+/// SelectInst: With ENABLE_SELECT_EXPRESSIONS, emit an ALF if statement. (Drawback:
+///   restriction does not work well). Otherwise, generate an if-then-else subgraph for
+///   selecting the appropriate value (Drawback: additional basic blocks).
 void ALFTranslator::visitSelectInst(SelectInst &I) {
 #ifdef ENABLE_SELECT_EXPRESSIONS
   assert(isExpressionInst(I) && "SelectInst should be a an expression (ENABLE_SELECT_EXPRESSIONS)");
@@ -891,15 +904,19 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
       setCurrentInstruction(Branch == 0 ? ":then" : ":else");
       SExpr *Val = buildOperand((Branch == 0) ? I.getTrueValue() : I.getFalseValue());
       SExpr *Store = ACtx->store(ACtx->address(getValueName(&I)),Val);
-      addStatement(Store);
+      ALFStatement* StoreStmt = addStatement(Store);
+      addMapping(StoreStmt->getLabel(), &I);
       addStatement(ACtx->jump(JoinLabel));
   }
   // join block
   setCurrentInstruction(":join");
-  addStatement(ACtx->null());
+  ALFStatement* JoinNopStmt = addStatement(ACtx->null());
+  addMapping(JoinNopStmt->getLabel(), &I);
 #endif
 }
 
+/// AllocaInst: Evaluates to the address of (a) the local variable for
+/// this alloca (static size) (b) the call to dyn_alloc (dynamic size)
 void ALFTranslator::visitAllocaInst(AllocaInst &AI) {
 
     SExpr *E;
@@ -918,7 +935,8 @@ void ALFTranslator::visitAllocaInst(AllocaInst &AI) {
     setVisitorResult(AI,E);
 }
 
-// The value for PHI nodes is set at the predecessor
+/// PHINode: Load the corresponding local variable, which is set at the predecessor or
+/// incoming edge.
 void ALFTranslator::visitPHINode(PHINode &I) {
     setVisitorResult(I,ACtx->load(getBitWidth(I.getType()), getValueName(&I), 0));
 }
@@ -1328,15 +1346,9 @@ SExpr* ALFTranslator::buildOperand(Value *Operand) {
     }
 }
 
-void ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
-    // Assign to the variables which are defined as PHI nodes
-    // in a direct successor of the current basic block.
-    // Note:   If we set the PHI copy in the direct successor,
-    //         there is no conflict when setting the phi copies for
-    //         all successors in the current basic block. It might
-    //         be more efficient to user intermediate BBs though.
-    // CAVEAT: The branch condition has to be saved to a temporary
-    //         variable BEFORE the successors are set.
+// Add unconditional jump from Block to Succ. Before that, set all PHI nodes
+// defined in the successor block
+ALFStatement* ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
     unsigned Ix = 0;
     for (BasicBlock::iterator I = Succ->begin(); isa<PHINode>(I); ++I, ++Ix) {
         PHINode *PN = cast<PHINode>(I);
@@ -1347,7 +1359,7 @@ void ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
             addStatement(Code);
         }
     }
-    addStatement(ACtx->jump(getBasicBlockLabel(Succ)));
+    return addStatement(ACtx->jump(getBasicBlockLabel(Succ)));
 }
 
 
@@ -1390,7 +1402,8 @@ void ALFTranslator::addSwitch(TerminatorInst& SI,
 	  for(std::set<BasicBlock*>::const_iterator I = EdgeBlocks.begin(), E = EdgeBlocks.end(); I!=E; ++I) {
 		  BasicBlock* Succ = *I;
 		  setCurrentInstruction(getBasicBlockLabel(Succ));
-		  addUnconditionalJump(BB, Succ);
+		  ALFStatement* Jump = addUnconditionalJump(BB, Succ);
+		  addMapping(Jump->getLabel(), &SI);
 	  }
 }
 
@@ -1812,18 +1825,24 @@ void ALFTranslator::setCurrentInstruction(Instruction *I, unsigned Index) {
     CurrentInstruction = I;
     CurrentInsIndex = Index;
     CurrentInsCounter = 0;
-    addMapping(I);
+    // Add basic block mapping, if this is the first statement in the current ALF statement group
+    if(CurrentBlock->empty()) {
+        addMapping(getBasicBlockLabel(I->getParent()), I);
+    }
+    // add mapping from the instruction to the corresponding ALF statement
+    addMapping(getInstructionLabel(I->getParent(),CurrentInsIndex), I);
 }
 
-void ALFTranslator::addMapping(Instruction *I) {
+void ALFTranslator::setCurrentInstruction(const std::string& TempBlockLabel) {
+    CurrentHelperBlock  = new std::string(TempBlockLabel);
+    CurrentInsCounter   = 0;
+}
+
+void ALFTranslator::addMapping(const StringRef Label, Instruction *I) {
     std::string File, Function;
     int Line, Col;
     if(getDebugLocation(I,File,Line,Col)) {
-        std::string Label;
-        if(CurrentBlock->empty()) {
-            Builder.addMapping(getBasicBlockLabel(I->getParent()), File + ";" + utostr(Line) + ";" + utostr(Col));
-        }
-        Builder.addMapping(getInstructionLabel(I->getParent(),CurrentInsIndex), File + ";" + utostr(Line) + ";" + utostr(Col));
+        Builder.addMapping(Label, File + ";" + utostr(Line) + ";" + utostr(Col));
     }
 }
 
@@ -1838,14 +1857,10 @@ bool ALFTranslator::getDebugLocation(Instruction *I, std::string& File, int &Lin
             Col  = Loc.getCol();
             return true;
         }
+    } else {
+        alf_warning("No debug information for instruction " + I->getParent()->getName() + ":" + valueToString(*I));
     }
     return false;
-}
-
-
-void ALFTranslator::setCurrentInstruction(const std::string& TempBlockLabel) {
-    CurrentHelperBlock  = new std::string(TempBlockLabel);
-    CurrentInsCounter   = 0;
 }
 
 std::string ALFTranslator::getInstructionLabel(const BasicBlock *BB, unsigned Index) {
