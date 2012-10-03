@@ -20,16 +20,15 @@ mstruct b;
 
 int main()
 {
-  int res = 0;
+  int expect[2] = {0, 0};
   mstruct c;
 
   /* ptr arithmetic between different stack variable and global variable (undefined) */
-  size_t d6 = (void*)&c - (void*)&a;
-  res += UEXPECT(d6);
-
+  size_t d6 = (void*)&c - (void*)&b;
+  if(UEXPECT(d6) == sizeof(b)) expect[0] = 1;
   /* ptr arithmetic (struct s) between different global variables (depends on linker) */
   size_t d7 = &b - &a;
-  res += UEXPECT(d7);
-
-  return res; /* expecting: [-200,200] */
+  if(UEXPECT(d7) == sizeof(a)) expect[1] = 1;
+  /* Expecting 0..3 (all expect entries undefined) */
+  return (expect[0]<<1) + expect[1];
 }
