@@ -1,0 +1,48 @@
+Tests known to fail:
+
+* alloca2
+
+Blame: SWEET
+Reason: dyn_alloc not supported by SWEET
+[sweet] Unknown expression nodetype in CAlfTreeTraversor::Traverse(const AExpr* expr)!
+
+* bool
+
+Blame: llvm2alf
+Reason: ALF translator does not handle struct type arguments correctly
+[sweet] Call to function: getbit with the wrong size of argument 1
+
+* bug_top_cmp2
+
+Blame: SWEET
+Reason: Bug #269
+[sweet] Execution of switch statement at { 54, 8 } did not result in any successor states.
+
+* indirect3, indirect4
+
+Blame: SWEET?
+Reason: Indirect calls of the form (offset = [0..2] * 4; *(fptab+offs)()) do not work in SWEET.
+        I'm not sure whether this is only due to missing congruence closure support, or other
+        issues.
+[sweet] Cannot extract (symbol, offset) pairs from value
+
+* indirect5
+
+Blame: llvm2alf
+Reason: Indirect branches (a.k.a. goto label offset) are not supported by llvm2alf yet
+[llvm2alf] Error: indirect branch instruction not yet supported
+
+* nondet2
+
+[sweet] Timeout
+
+* pointer_undef1
+
+Blame: SWEET
+Reason: same as bug_top_cmp2
+[sweet] Execution of switch statement at { 93, 8 } did not result in any successor states
+        (i.e., no branch was followed).
+
+* sample
+
+[sweet] Timeout

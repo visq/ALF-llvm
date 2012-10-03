@@ -1,0 +1,5 @@
+M=bug_top_cmp2
+source libtest
+sweet_ae || die "sweet abstract execution failed"
+sweet_css && die "sweet single-path execution succeeded (expect failure)"
+true
