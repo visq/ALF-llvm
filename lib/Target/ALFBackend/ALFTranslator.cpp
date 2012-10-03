@@ -922,17 +922,19 @@ void ALFTranslator::visitAllocaInst(AllocaInst &AI) {
     SExpr *E;
     if (isStaticSizeAlloca(&AI) != 0) {
         E = ACtx->address(getValueName(&AI), 0);
+        setVisitorResult(AI,E);
     } else {
         const Value* ArraySize = AI.getArraySize();
         Type* SizeType = ArraySize->getType();
         Constant* ElementSize = ConstantInt::get(SizeType, getBitWidth(AI.getAllocatedType()) / 8, false);
         SExpr *AllocatedSize = buildMultiplication(getBitWidth(SizeType), const_cast<Value*>(ArraySize), ElementSize);
-        E = ACtx->list("dyn_alloc")
+        SExpr *DynMemAddr = ACtx->list("dyn_alloc")
                 ->append(Builder.getConfig()->getBitsOffset())
                 ->append(ACtx->fref(getValueName(&AI)))
                 ->append(AllocatedSize);
+        SExpr *Store = ACtx->store(ACtx->address(getValueName(&AI)),DynMemAddr);
+        addStatement(Store);
     }
-    setVisitorResult(AI,E);
 }
 
 /// PHINode: Load the corresponding local variable, which is set at the predecessor or
@@ -1355,7 +1357,7 @@ ALFStatement* ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock*
         Value *IV = PN->getIncomingValueForBlock(Block);
         if (!isa<UndefValue>(IV)) {
             SExpr* Code = ACtx->store(ACtx->address(getValueName(I)),buildOperand(IV));
-            Code->setComment("assign to PHI node");
+            Code->setComment("Assign to PHI node");
             addStatement(Code);
         }
     }
@@ -1425,7 +1427,7 @@ SExpr* ALFTranslator::buildConstantExpression(const ConstantExpr* CE) {
 	std::auto_ptr<ALFConstant> FoldedConstant = foldConstant(CE);
 
 	if(FoldedConstant.get() == 0) {
-	    alf_warning("Failed to fold constant expression, emiting undefined: " + valueToString(*CE));
+	    alf_warning("Failed to fold constant expression " + valueToString(*CE) + " -> emiting undefined");
 	    return ACtx->undefined(getBitWidth(CE->getType()));
 	} else {
 	    return FoldedConstant->createSExpr(ACtx);
@@ -1540,10 +1542,10 @@ std::auto_ptr<ALFConstant> ALFTranslator::foldBinaryConstantExpression(const Con
 			if(ALFConstAddress* AddrRight = dyn_cast<ALFConstAddress>(OpRight.get())) {
 				// Addr <op> Addr
 				if(AddrLeft->getFrame() != AddrRight->getFrame()) {
-					errs() << "llvm2alf: foldBinaryConstantExpression: Arithmetic on pointers in different frames is undefined\n";
+				    alf_warning("foldBinaryConstantExpression: Arithmetic on pointers in different frames is undefined");
 					return std::auto_ptr<ALFConstant> (0);
 				} else if(CE->getOpcode() == Instruction::Add) {
-					errs() << "llvm2alf: foldBinaryConstantExpression: Sum of two pointers is undefined\n";
+					alf_warning("foldBinaryConstantExpression: Sum of two pointers is undefined");
 					return std::auto_ptr<ALFConstant> (0);
 				}
 				// CAVEAT: ALF uses bit offsets, C byte offsets for addresses
@@ -1858,7 +1860,7 @@ bool ALFTranslator::getDebugLocation(Instruction *I, std::string& File, int &Lin
             return true;
         }
     } else {
-        alf_warning("No debug information for instruction " + I->getParent()->getName() + ":" + valueToString(*I));
+        DEBUG(alf_warning("No debug information for instruction " + I->getParent()->getName() + ":" + valueToString(*I)));
     }
     return false;
 }
