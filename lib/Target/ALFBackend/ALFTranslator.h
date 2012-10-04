@@ -166,11 +166,17 @@ namespace llvm {
 	/// Prefix for frame name of frames addressed using absolute addresses
 	const static string ABS_REF_PREFIX;
 
-	/// Suffix for return value label
-    const static string RETURN_VALUE_LABEL_SUFFIX;
+    /// Suffix for entry block label
+    const static string ENTRY_LABEL_SUFFIX;
+
+    /// Suffix for exit block label
+    const static string EXIT_LABEL_SUFFIX;
 
     /// Name of the frame used to store temporary return values
 	const static string RETURN_VALUE_REF;
+
+    /// Suffix for non-scalar formal parameter references
+    const static string ARG_BYREF_SUFFIX;
 
 	/// Type of (case,target) list for switch instructions
 	typedef SmallVector< std::pair<Value*, BasicBlock*> , 32> CaseVector;
