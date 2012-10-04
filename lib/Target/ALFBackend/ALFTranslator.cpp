@@ -80,8 +80,12 @@ inline std::string typeToString(const Type& T) {
 const string ALFTranslator::NULL_REF("$null");
 const string ALFTranslator::ABS_REF("$mem");
 const string ALFTranslator::ABS_REF_PREFIX("$mem_");
+
+const string ALFTranslator::ENTRY_LABEL_SUFFIX("$entry");
+const string ALFTranslator::EXIT_LABEL_SUFFIX("$exit");
+
+const string ALFTranslator::ARG_BYREF_SUFFIX("$ref");
 const string ALFTranslator::RETURN_VALUE_REF("$rv");
-const string ALFTranslator::RETURN_VALUE_LABEL_SUFFIX("$return");
 
 void llvm::alf_fatal_error(const Twine& Reason, Instruction& Ins) {
     DebugLoc Loc = Ins.getDebugLoc();
@@ -129,7 +133,7 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
 
     this->ACtx = AF;
 
-    // add arguments
+    // add arguments and local variables for composite-type-by-value args and composite return type
     processFunctionSignature(F, AF);
 
     // Declare local variables for storing instruction results. We need local variables for:
@@ -156,11 +160,12 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
         }
     }
 
-    // Add (unique, additional) exit basic block if necessary
-    // FIXME: we cannot generate sensible mapping info for this BB
+    // Add return value frame if neccessary
     if(ReturnInstructionCount > 1) {
-        AF->addLocal(RETURN_VALUE_REF, getBitWidth(F->getReturnType()), "return value");
         AF->setMultiExit(true);
+        if(! AF->isReturnByReference()) {
+            AF->addLocal(RETURN_VALUE_REF, getBitWidth(F->getReturnType()), "return value");
+        }
     } else {
         AF->setMultiExit(false);
     }
@@ -170,30 +175,17 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
         processBasicBlock(BB, AF);
     }
 
-    // add return block for multi-exit functions
+    // Add (unique, additional) exit basic block if necessary
+    // FIXME: add sensible mapping info for this BB
     if(AF->isMultiExit()) {
-        CurrentBlock = AF->addBasicBlock(F->getName()+"::"+RETURN_VALUE_LABEL_SUFFIX, "Exit block");
+        CurrentBlock = AF->addBasicBlock(F->getName()+"::"+EXIT_LABEL_SUFFIX, "Exit block");
         SExpr *RetExpr;
-        if(F->getReturnType()->isVoidTy()) {
+        if(F->getReturnType()->isVoidTy() || AF->isReturnByReference()) {
             RetExpr = ACtx->ret();
         } else {
             RetExpr = ACtx->ret(ACtx->load(getBitWidth(F->getReturnType()), RETURN_VALUE_REF, 0));
         }
-        CurrentBlock->addStatement(F->getName()+"::"+RETURN_VALUE_LABEL_SUFFIX+"::0", "return statement", RetExpr);
-    }
-    // TODO: Support struct returns
-    bool isStructReturn = F->hasStructRetAttr();
-
-
-    if (isStructReturn) {
-        alf_fatal_error("We cannot handle struct returns yet",F);
-        // const Type *StructTy =
-        //   cast<PointerType>(F.arg_begin()->getType())->getElementType();
-        // printType(Out, StructTy, false, "StructReturn");
-        // Out << ";  /* Struct return temporary */\n";
-        // printType(Out, F.arg_begin()->getType(), false,
-        //           getValueName(F.arg_begin()));
-        // Out << " = &StructReturn;\n";
+        CurrentBlock->addStatement(F->getName()+"::"+EXIT_LABEL_SUFFIX+"::0", "return statement", RetExpr);
     }
 }
 
@@ -218,9 +210,10 @@ void ALFTranslator::addVolatileFrames()
     }
 }
 
-// emit function signature {func LABEL ARG_DECLS SCOPE}
-// FIXME: Ignoring calling conventions and linkage
-// FIXME: We do not support varargs
+// Process function signature (label, formal parameters)
+// Non-scalar type arguments need to be passed by reference (and be copied when passing them)
+// FIXME: We ignore calling conventions and linkage
+// TODO: Support varargs
 void ALFTranslator::processFunctionSignature(const Function *F, ALFFunction *AF) {
 
     // Loop over the arguments, printing them...
@@ -231,14 +224,25 @@ void ALFTranslator::processFunctionSignature(const Function *F, ALFFunction *AF)
         alf_fatal_error("processFunctionSignature(): variable argument lists are not supported", F);
     } else if (! F->arg_empty()) {
         unsigned Idx = 1;
+        // We ignore Attribute::ByVal now ; see: http://bugzilla.mdh.se/bugzilla/show_bug.cgi?id=292
         for (Function::const_arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E; ++I) {
-            // see: http://bugzilla.mdh.se/bugzilla/show_bug.cgi?id=292
-            // if (F->getAttributes().paramHasAttr(Idx, Attribute::ByVal)) {
-            //    alf_warning("Attribute::ByVal ignored; type = " + typeToString(*FT));
-            // }
-            AF->addFormal(getValueName(I), getBitWidth(I->getType()));
+            if(isScalarValueType(I->getType())) {
+                // Scalars are passed by value
+                AF->addFormal(getValueName(I), getBitWidth(I->getType()));
+            } else {
+                // Non-scalars need to be passed by reference and copied into local variables
+                AF->addFormal(getValueName(I) + ARG_BYREF_SUFFIX, AF->getConfig()->getBitsFRef());
+                AF->addLocal(getValueName(I), getBitWidth(I->getType()), "Non-Scalar by-value argument copy");
+            }
             ++Idx;
         }
+    }
+    // Add non-scalar return value argument
+    if (! isScalarValueType(FT->getReturnType())) {
+        AF->setReturnByReference(true);
+        AF->addFormal(RETURN_VALUE_REF, ACtx->getConfig()->getBitsFRef());
+    } else {
+        AF->setReturnByReference(false);
     }
 }
 
@@ -247,6 +251,20 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
     BasicBlock *BB = const_cast<BasicBlock*>(BBconst);
     CurrentBlock = ACtx->addBasicBlock(getBasicBlockLabel(BB), BB->getName());
 
+    if(BB == &BB->getParent()->getEntryBlock()) {
+        // Copy non-scalar by-value arguments first
+        if (! BB->getParent()->arg_empty()) {
+            setCurrentInstruction(const_cast<Instruction*>(BB->getParent()->getEntryBlock().getFirstNonPHIOrDbg()),0);
+            setCurrentInstruction(ENTRY_LABEL_SUFFIX);
+            for (Function::arg_iterator I = BB->getParent()->arg_begin(), E = BB->getParent()->arg_end(); I != E; ++I) {
+                if(isScalarValueType(I->getType()))
+                    continue;
+                SExpr* SrcPtr = ACtx->load(ACtx->getConfig()->getBitsFRef(), getValueName(I)+ARG_BYREF_SUFFIX);
+                SExpr* DstPtr = ACtx->address(getValueName(I), 0);
+                addCopyStatements(I->getType(),SrcPtr,DstPtr);
+            }
+        }
+    }
     // Add statements covering all of the instructions in the basic block...
     unsigned Index = 0;
     for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE; ++II, ++Index) {
@@ -649,25 +667,27 @@ bool ALFTranslator::isInlinableInst(const Instruction &I) {
 /// a store to the return value temporary and a jump to the unique exit block.
 void ALFTranslator::visitReturnInst(ReturnInst &I) {
 
-  // TODO: struct return
-  bool isStructReturn = I.getParent()->getParent()->hasStructRetAttr();
-  if (isStructReturn) {
-      alf_fatal_error("struct return not yet supported", I);
-  }
   ALFFunction *AF = (ALFFunction*)(ACtx); // in function context
+  if(AF->isReturnByReference()) {
+      // copy return values to the address passed as formal argument
+      SExpr *DstExpr = ACtx->load(ACtx->getConfig()->getBitsFRef(), RETURN_VALUE_REF);
+      addCopyStatements(I.getReturnValue()->getType(), buildOperand(I.getReturnValue()), DstExpr);
+  } else if(AF->isMultiExit() && I.getNumOperands() != 0) {
+      // store the return value before jumping to the unique exit block
+      SExpr *Store = ACtx->store(ACtx->address(RETURN_VALUE_REF),buildOperand(I.getOperand(0)));
+      addStatement(Store);
+  }
   if(AF->isMultiExit()) {
-      SExpr *JumpToExit = ACtx->jump(I.getParent()->getParent()->getName() + "::" + RETURN_VALUE_LABEL_SUFFIX);
-      if(I.getNumOperands() != 0) {
-          SExpr *Store = ACtx->store(ACtx->address(RETURN_VALUE_REF),buildOperand(I.getOperand(0)));
-          addStatement(Store);
-          addStatement(JumpToExit);
-      } else {
-          addStatement(JumpToExit);
-      }
+      // jump to unique exit block
+      SExpr *JumpToExit = ACtx->jump(I.getParent()->getParent()->getName() + "::" + EXIT_LABEL_SUFFIX);
+      addStatement(JumpToExit);
   } else {
+      // return value unless void return type or return by reference
       SExprList* Ret = ACtx->ret();
       if(Value* RetVal = I.getReturnValue()) {
-          Ret->append(buildOperand(RetVal));
+          if(! AF->isReturnByReference()) {
+              Ret->append(buildOperand(RetVal));
+          }
       }
       addStatement(Ret);
   }
@@ -758,11 +778,6 @@ void ALFTranslator::visitCallInst(CallInst &I) {
       if (visitBuiltinCall(I, ID))
         return;
 
-  // Struct returns: FIXME: struct returns are not supported yet
-  if (I.hasStructRetAttr()) {
-      alf_fatal_error("struct return is not supported yet",I);
-  }
-
   Value *Callee = I.getCalledValue();
   const PointerType  *PTy   = cast<PointerType>(Callee->getType());
   const FunctionType *FTy   = cast<FunctionType>(PTy->getElementType());
@@ -795,8 +810,14 @@ void ALFTranslator::visitCallInst(CallInst &I) {
     }
     Call->append(buildOperand(*AI));
   }
+
+  // Add argument for non-scalar return type
+  if (! isScalarValueType(I.getType())) {
+      Call->append(ACtx->address(getValueName(&I)));
+  }
+
   Call->append("result");
-  if(! FTy->getReturnType()->isVoidTy()) {
+  if(! FTy->getReturnType()->isVoidTy() && isScalarValueType(I.getType())) {
     Call->append(ACtx->address(getValueName(&I), 0));
   }
   assert(! isExpressionInst(I) && "CallInst should be a statement, not an expression");
