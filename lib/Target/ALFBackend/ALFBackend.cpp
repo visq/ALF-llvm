@@ -89,6 +89,11 @@ ALFIgnoreVolatiles("alf-ignore-volatiles", cl::NotHidden,
             cl::init(false));
 
 static cl::opt<std::string>
+ALFIgnoreDefinitions("alf-ignore-definitions", cl::NotHidden,
+            cl::desc("Comma-separated list of definitions which should be ignored during translation (e.g.'_start,printf')"),
+            cl::init(""));
+
+static cl::opt<std::string>
 ALFMemoryAreas("alf-memory-areas", cl::NotHidden,
             cl::desc("Comma-separated list of memory ranges, accessed using absolute addresses (e.g.'0x0-0xe,0x30-0x40')"),
             cl::init(""));
@@ -155,9 +160,10 @@ namespace {
   /// Adapted from the C Backend
   class ALFBackend : public FunctionPass {
 
-    // target configuration
+    /// Least Addressable Unit (8 bit is probably ok)
+    const unsigned LeastAddrUnit;
 
-    const unsigned LeastAddrUnit;      // Least Addressable Unit (8 bit is probably ok)
+    // Target Machine information
     const TargetData* TD;
     MCContext *TCtx;
     const MCAsmInfo* TAsm;
@@ -165,8 +171,11 @@ namespace {
     IntrinsicLowering *IL;
     Mangler *Mang;
 
-	/// ALFOutput for directly emmiting ALF code (should not be used anymore)
-	ALFOutput Output;
+    /// Ignored Definitions
+    std::set<std::string> IgnoredDefinitions;
+
+    /// ALFOutput for directly emmiting ALF code (should not be used anymore)
+    ALFOutput Output;
 
     /// ALFBuilder for generating ALF code via a high level interface
     ALFBuilder Builder;
@@ -222,7 +231,21 @@ namespace {
   private :
 
     void addMemoryAreas(std::string& AreaSpec, bool IsVolatile);
+    void addIgnoredDefinitions(std::string& List);
     void lowerIntrinsics(Function &F);
+
+    /// return true if the function/object should be ignored
+    bool isIgnoredDefinition(const StringRef FunctionName) {
+      return IgnoredDefinitions.count(FunctionName) > 0;
+    }
+
+    /// return true if the function should be treated as declaration (no function body)
+    bool isDeclaration(const Function &F) {
+      if(isIgnoredDefinition(F.getName())) return true;
+      if(F.isIntrinsic()) return false;
+      if(F.isDeclaration()) return true;
+      return false;
+    }
 
     // Functions and Basic Blocks
     void visitFunction(Function &);
@@ -251,6 +274,9 @@ bool ALFBackend::doInitialization(Module &M) {
   Mang = new Mangler(*TCtx, *TD);
 
   Translator.initializeTarget(TAsm, TD, MRI);
+
+  // Ignored Definitions
+  addIgnoredDefinitions(ALFIgnoreDefinitions);
 
   // Lower unsupported intrinsic calls
   for (Module::iterator I = M.begin(), E = M.end(); I!=E; ++I) {
@@ -302,14 +328,14 @@ bool ALFBackend::doInitialization(Module &M) {
 // TODO: Process Linkage Information [1]
 // TODO: Handle LLVM_ASM (name starts with 1)
 void ALFBackend::processFunctionImports(Module &M) {
-    for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
-        if(I->isDeclaration() && !I->isIntrinsic()) {
-            if(!ALFStandalone) {
-                std::string Label = Translator.getValueName(I);
-                Builder.importLabel(Label);
-            } // otherwise: add stub
-        }
+  for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
+    if(isDeclaration(*I)) {
+      if(!ALFStandalone) {
+        std::string Label = Translator.getValueName(I);
+        Builder.importLabel(Label);
+      } // otherwise: add stub
     }
+  }
 }
 
 // Global variables (import or definition/export)
@@ -362,24 +388,30 @@ void ALFBackend::processGlobalVariables(Module &M) {
 void ALFBackend::addBuiltinFunctions(Module &M) {
     if(ALFStandalone) {
         for (Module::iterator F = M.begin(), E = M.end(); F != E; ++F) {
-            // If function is not defined and not an intrinsic, we either need to import it or generate a stub
+            // If the function has no definition, we either need to import it or generate a stub
             // TODO Linkage / LLVM_ASM (name starts with 1)
-            if(! F->isDeclaration() || F->isIntrinsic()) continue;
-            ALFFunction *AF = Builder.addFunction(F->getName(), Translator.getValueName(F), "STUB for undefined function " + F->getName());
-            Translator.processFunctionSignature(F, AF);
-            Type *RTy = F->getReturnType();
+          if(! isDeclaration(*F)) continue;
+          ALFFunction *AF = Builder.addFunction(F->getName(), Translator.getValueName(F),
+                                                "STUB for undefined function " + F->getName());
+          Translator.processFunctionSignature(F, AF);
+          Type *RTy = F->getReturnType();
+          ALFStatementGroup* Block = AF->addBasicBlock(F->getName() + "::entry", "Generated Basic Block (return undef)");
+          if(! RTy->isVoidTy()) {
             SExpr *Z = Builder.load(Translator.getBitWidth(RTy), Builder.address(Translator.getVolatileStorage(RTy)));
-            ALFStatementGroup* Block = AF->addBasicBlock(F->getName() + "::entry", "Generated Basic Block (return undef)");
             Block->addStatement(F->getName() + "::entry::0", "return undef", Builder.ret(Z));
+          } else {
+            alf_warning("Emitting no-op stub for function " + Twine(F->getName()) + "returning void");
+            Block->addStatement(F->getName() + "::entry::0", "return", Builder.ret());
+          }
         }
     }
 }
 
 bool ALFBackend::runOnFunction(Function &F) {
- // Do not codegen any 'available_externally' functions at all, they have
- // definitions outside the translation unit.
- if (F.hasAvailableExternallyLinkage())
-   return false;
+  // Do not codegen any 'available_externally' functions at all, they have
+  // definitions outside the translation unit. Also skip declarations.
+  if (F.hasAvailableExternallyLinkage() || isDeclaration(F))
+    return false;
 
   LI = &getAnalysis<LoopInfo>();
 
@@ -427,18 +459,27 @@ void ALFBackend::addMemoryAreas(std::string& AreaSpec, bool IsVolatile)
     if(AreaSpec.empty()) {
         return;
     }
-	SmallVector<StringRef,8> MemoryAreaList;
-	StringRef(AreaSpec).split(MemoryAreaList, StringRef(","));
-	for(SmallVector<StringRef,8>::iterator I = MemoryAreaList.begin(), E = MemoryAreaList.end(); I!=E; ++I) {
-		  std::pair<StringRef,StringRef> StartEnd = I->split("-");
-		  unsigned long long Start, End;
-		  if(StartEnd.first.getAsInteger(0,Start) || StartEnd.second.getAsInteger(0,End)) {
-			  report_fatal_error("Bad area specification '"+AreaSpec+"':  Range " +
-					             StartEnd.first + " to " + StartEnd.second +
-					             " is not a pair of valid addresses.");
-		  }
-		  Translator.addMemoryArea((uint64_t)Start, (uint64_t)End, IsVolatile);
-	}
+    SmallVector<StringRef,8> MemoryAreaList;
+    StringRef(AreaSpec).split(MemoryAreaList, StringRef(","));
+    for(SmallVector<StringRef,8>::iterator I = MemoryAreaList.begin(), E = MemoryAreaList.end(); I!=E; ++I) {
+      std::pair<StringRef,StringRef> StartEnd = I->split("-");
+      unsigned long long Start, End;
+      if(StartEnd.first.getAsInteger(0,Start) || StartEnd.second.getAsInteger(0,End)) {
+        report_fatal_error("Bad area specification '"+AreaSpec+"':  Range " +
+                           StartEnd.first + " to " + StartEnd.second +
+                           " is not a pair of valid addresses.");
+      }
+      Translator.addMemoryArea((uint64_t)Start, (uint64_t)End, IsVolatile);
+    }
+}
+
+void ALFBackend::addIgnoredDefinitions(std::string& List)
+{
+  SmallVector<StringRef,8> IgnDefList;
+  StringRef(List).split(IgnDefList, StringRef(","));
+  for(SmallVector<StringRef,8>::iterator I = IgnDefList.begin(), E = IgnDefList.end(); I!=E; ++I) {
+    IgnoredDefinitions.insert(I->str());
+  }
 }
 
 //===----------------------------------------------------------------------===//
