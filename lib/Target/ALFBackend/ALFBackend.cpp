@@ -239,6 +239,13 @@ namespace {
       return IgnoredDefinitions.count(FunctionName) > 0;
     }
 
+    /// return true if the object should be treated as declaration (imported object)
+    bool isDeclaration(const GlobalVariable *V) {
+      if(V->isDeclaration()) return true;
+      if(isIgnoredDefinition(V->getName())) return true;
+      return false;
+    }
+
     /// return true if the function should be treated as declaration (no function body)
     bool isDeclaration(const Function &F) {
       if(isIgnoredDefinition(F.getName())) return true;
@@ -289,8 +296,6 @@ bool ALFBackend::doInitialization(Module &M) {
   // Set Bit Width
   Builder.setBitWidths(TD->getPointerSizeInBits(), TD->getPointerSizeInBits(), TD->getPointerSizeInBits());
 
-  /// Emit global warnings, if any
-
   // Keep track of which functions are static ctors/dtors so they can have
   // an attribute added to their prototypes.
   // TODO: Not quite clear how to model this in ALF
@@ -330,10 +335,10 @@ bool ALFBackend::doInitialization(Module &M) {
 void ALFBackend::processFunctionImports(Module &M) {
   for (Module::iterator I = M.begin(), E = M.end(); I != E; ++I) {
     if(isDeclaration(*I)) {
-      if(!ALFStandalone) {
+      if(! ALFStandalone) {
         std::string Label = Translator.getValueName(I);
         Builder.importLabel(Label);
-      } // otherwise: add stub
+      } // otherwise: add stub later
     }
   }
 }
@@ -352,9 +357,11 @@ void ALFBackend::processGlobalVariables(Module &M) {
           if (I->getSection() == "llvm.metadata")
             continue;
           // add frame
-          bool IsImported = I->isDeclaration();
-          bool IsExported = ! I->hasLocalLinkage();
+          bool IsImported = isDeclaration(I);
+          bool IsExported = ! IsImported && ! I->hasLocalLinkage();
           FrameStorage Storage = IsImported ? ImportedFrame : (IsExported ? ExportedFrame : InternalFrame);
+	  if (ALFStandalone)
+	    Storage = InternalFrame; // in standalone mode, we have uninitialized globals
           unsigned SizeInBits = Translator.getBitWidth(I->getType()->getElementType());
           Builder.addFrame(Translator.getValueName(I), SizeInBits, Storage);
           // All global variables (which are not special purpose) need to be initialized
