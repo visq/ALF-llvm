@@ -129,8 +129,18 @@ void llvm::alf_fatal_error(const Twine& Reason, const Function* F) {
     report_fatal_error("[llvm2alf] Error: " + Reason + (F?" in Function "+F->getName():""));
 }
 
-void llvm::alf_warning(const Twine& Msg) {
-    errs() << "[llvm2alf] Warning: " << Msg << "\n";
+void llvm::alf_warning(const Twine& Msg, const Function* F) {
+  errs() << "[llvm2alf] ";
+  if(F)
+    errs() << "In " << F->getName() << ": ";
+  errs() << "Warning: " << Msg << "\n";
+}
+
+void llvm::alf_warning(const Twine& Msg, const Instruction &I) {
+  errs() << "[llvm2alf] " << "In " << I.getParent()->getParent()->getName() << ": ";
+  errs() <<  "in " << I.getParent()->getName() << ": " << Msg << " [";
+  I.print(errs());
+  errs() << "] \n";
 }
 
 
@@ -1317,7 +1327,7 @@ void ALFTranslator::visitCastInst(CastInst &I) {
 
   // Pointers (which might be symbolic memory addresses) cannot be coerced to integers in ALF
   case Instruction::PtrToInt:
-      alf_warning("Unsupported PtrToInt instruction (emitting undefined)");
+      alf_warning("Unsupported PtrToInt instruction (emitting undefined)", I);
       E = ACtx->undefined(getBitWidth(DstTy))
             ->setComment("undefined ptr2int");
 	  break;
@@ -1350,7 +1360,8 @@ void ALFTranslator::visitCastInst(CastInst &I) {
 			   TD->getTypeAllocSizeInBits(Operand->getType()) && "bitcast between type of different size");
 		E = buildOperand(Operand);
 	} else {
-	    alf_fatal_error("unsupported BitCast instruction", I);
+	  alf_warning("Unsupported Bitcast instruction (emitting undefined)", I);
+	  E = ACtx->undefined(getBitWidth(DstTy))->setComment("undefined bitcast");
 	}
 	break;
   default:

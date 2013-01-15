@@ -62,7 +62,10 @@ namespace llvm {
   LLVM_ATTRIBUTE_NORETURN void alf_fatal_error(const Twine& Reason, const Type& Ty);
 
   /// Emit a warning
-  void alf_warning(const Twine& Msg);
+  void alf_warning(const Twine& Msg, const Function *F = 0);
+
+  /// Emit a warning (instruction information)
+  void alf_warning(const Twine& Msg, const Instruction &I);
 
   /// Specification of areas of memory which are addressed using absolute addresses
   class MemoryArea {
