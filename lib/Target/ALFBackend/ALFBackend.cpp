@@ -371,6 +371,13 @@ void ALFBackend::addBuiltinFunctions(Module &M) {
             SExpr *Z = Builder.load(Translator.getBitWidth(RTy), Builder.address(Translator.getVolatileStorage(RTy)));
             ALFStatementGroup* Block = AF->addBasicBlock(F->getName() + "::entry", "Generated Basic Block (return undef)");
             Block->addStatement(F->getName() + "::entry::0", "return undef", Builder.ret(Z));
+//          } else {
+//            if(! isIgnoredDefinition(F->getName())) {
+//              alf_warning("Emitting no-op stub for function '" + Twine(F->getName()) + "' returning void");
+//            }
+//            Block->addStatement(F->getName() + "::entry::0", "return", Builder.ret());
+//          }
+// 
         }
     }
 }
