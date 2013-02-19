@@ -16,6 +16,7 @@
 #define __ALF_TRANSLATOR_H__
 
 #include "llvm/Constants.h"
+#include "llvm/DataLayout.h"
 #include "llvm/InlineAsm.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -23,7 +24,6 @@
 #include "llvm/Target/Mangler.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
-#include "llvm/Target/TargetData.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
 #include "ALFBuilder.h"
 
@@ -146,7 +146,7 @@ namespace llvm {
     unsigned NextAnonValueNumber;
 
     /// target configuration
-    const TargetData* TD;
+    const DataLayout* TD;
 
     /// Machine code context
     MCContext *TCtx;
@@ -195,7 +195,7 @@ namespace llvm {
 	    this->ACtx = &Builder;
 	}
 
-	void initializeTarget(const MCAsmInfo* _TAsm, const TargetData* _TD, const MCRegisterInfo *_MRI) {
+	void initializeTarget(const MCAsmInfo* _TAsm, const DataLayout* _TD, const MCRegisterInfo *_MRI) {
   	  TAsm = _TAsm;
   	  TD = _TD;
   	  TCtx = new MCContext(*TAsm, *_MRI, NULL);
@@ -417,7 +417,7 @@ namespace llvm {
     std::pair<Value*, int64_t> getBitOffset(CompositeType* Ty, Value* Index);
 
     /// Get number of bits needed to represent the given type in the ALF memory model
-    /// Uses TargetData TD to support platfrom-specific behavior
+    /// Uses DataLayout TD to support platfrom-specific behavior
     unsigned getBitWidth(Type *Ty) {
         return TD->getTypeSizeInBits(Ty);
     }
