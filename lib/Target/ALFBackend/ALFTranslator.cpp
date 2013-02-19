@@ -16,7 +16,7 @@
 
 #include "ALFTranslator.h"
 #include "llvm/IntrinsicInst.h"
-#include "llvm/Analysis/DebugInfo.h"
+#include "llvm/DebugInfo.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/InstIterator.h"
 
@@ -819,12 +819,12 @@ void ALFTranslator::visitCallInst(CallInst &I) {
       alf_fatal_error("coercion of function parameters is not supported", I);
     }
     // Check if the argument is expected to be passed by value.
-    if (I.paramHasAttr(ArgNo+1, Attribute::ByVal)) {
-        // This has no direct consequence for ALF code generation, but may lead
-        // to problems when a caller uses the C interface
-        // Unfortunately, there is no way to circumvent this problem, and it
-        // is not always detectable (http://bugzilla.mdh.se/bugzilla/show_bug.cgi?id=292)
-    }
+    // This has no direct consequence for ALF code generation, but may lead
+    // to problems when a caller uses the C interface
+    // Unfortunately, there is no way to circumvent this problem, and it
+    // is not always detectable (http://bugzilla.mdh.se/bugzilla/show_bug.cgi?id=292)
+    // if (I.paramHasAttr(ArgNo+1, Attribute::ByVal)) {
+    // }
     Call->append(buildOperand(*AI));
   }
 
@@ -1961,24 +1961,6 @@ std::pair<Value*, int64_t> ALFTranslator::getBitOffset(CompositeType* Ty, Value*
     } else {
         alf_fatal_error("visitGetElementPtrInst: Unexpected/Unsupported type in address arithmetic", *Ty);
     }
-}
-
-
-// This converts the llvm constraint string to something gcc is expecting.
-// TODO: currently unused
-std::string ALFTranslator::interpretASMConstraint(InlineAsm::ConstraintInfo& c) {
-  assert(c.Codes.size() == 1 && "Too many asm constraint codes to handle");
-
-  const char *const *table = TAsm->getAsmCBE();
-
-  // Search the translation table if it exists.
-  for (int i = 0; table && table[i]; i += 2)
-    if (c.Codes[0] == table[i]) {
-      return table[i+1];
-    }
-
-  // Default is identity.
-  return c.Codes[0];
 }
 
 

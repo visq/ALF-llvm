@@ -164,7 +164,7 @@ namespace {
     const unsigned LeastAddrUnit;
 
     // Target Machine information
-    const TargetData* TD;
+    const DataLayout* TD;
     MCContext *TCtx;
     const MCAsmInfo* TAsm;
     const MCRegisterInfo *MRI;
@@ -270,9 +270,9 @@ bool ALFBackend::doInitialization(Module &M) {
   // Initialize
   TheModule = &M;
   if(ALFTargetData == "!HOST!") {
-	  TD = new TargetData(&M);
+	  TD = new DataLayout(&M);
   } else {
-	  TD = new TargetData(ALFTargetData);
+	  TD = new DataLayout(ALFTargetData);
   }
   IL = new IntrinsicLowering(*TD);
   TAsm = new ALFMCAsmInfo();
@@ -563,9 +563,11 @@ void ALFBackend::lowerIntrinsics(Function &F) {
 
 // TODO should we run GCLowering / LowerInvoke passes?
 bool ALFTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
-                                         formatted_raw_ostream &o,
-                                         CodeGenFileType FileType,
-                                         bool DisableVerify) {
+                                           formatted_raw_ostream &o,
+                                           CodeGenFileType FileType,
+                                           bool DisableVerify,
+                                           AnalysisID StartAfter,
+                                           AnalysisID StopAfter) {
   if (FileType != TargetMachine::CGFT_AssemblyFile) return true;
 
   // Do not simplify CFG by default, as it is difficult to predict the translation this way

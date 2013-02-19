@@ -15,7 +15,7 @@
 #define CTARGETMACHINE_H
 
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/Target/TargetData.h"
+#include "llvm/DataLayout.h"
 
 namespace llvm {
 
@@ -30,9 +30,11 @@ struct ALFTargetMachine : public TargetMachine {
   virtual bool addPassesToEmitFile(PassManagerBase &PM,
                                    formatted_raw_ostream &Out,
                                    CodeGenFileType FileType,
-                                   bool DisableVerify);
+                                   bool DisableVerify,
+                                   AnalysisID StartAfter,
+                                   AnalysisID StopAfter);
 
-  virtual const TargetData *getTargetData() const { return 0; }
+  virtual const DataLayout *getDataLayout() const { return 0; }
 };
 
 extern Target TheALFBackendTarget;
