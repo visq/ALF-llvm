@@ -399,10 +399,12 @@ void ALFBackend::addBuiltinFunctions(Module &M) {
           if(! RTy->isVoidTy()) {
             SExpr *Z = Builder.load(Translator.getBitWidth(RTy), Builder.address(Translator.getVolatileStorage(RTy)));
             Block->addStatement(F->getName() + "::entry::0", "return undef", Builder.ret(Z));
-          } else {
-            alf_warning("Emitting no-op stub for function " + Twine(F->getName()) + "returning void");
-            Block->addStatement(F->getName() + "::entry::0", "return", Builder.ret());
-          }
+         } else {
+           if(! isIgnoredDefinition(F->getName())) {
+             alf_warning("Emitting no-op stub for function '" + Twine(F->getName()) + "' returning void");
+           }
+           Block->addStatement(F->getName() + "::entry::0", "return", Builder.ret());
+         }
         }
     }
 }
