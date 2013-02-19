@@ -1,0 +1,21 @@
+From the git rebase manual:
+
+Before:
+    o---o---o---o---o----o----o llvm_32
+         \
+          o---o---o---o---o  llvm_31
+                           \
+                            o---o---o  alf_31
+Should become
+
+    o---o---o---o---o  llvm_32
+        |            \
+        |             o'--o'--o'  alf_32
+         \
+          o---o---o---o---o  llvm_31
+                           \
+                            o---o---o  alf_31
+
+This is done by issuing:
+> git checkout -b alf_32
+> git rebase --onto llvm_32 llvm_32 alf_31
