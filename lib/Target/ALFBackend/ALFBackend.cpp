@@ -13,10 +13,6 @@
 //
 // Problems, in priority order:
 //
-// High Priority:
-//
-// TODO: Add support for .map files
-//
 // Medium Priority:
 //
 // TODO: Add command line help (-mattr=help)

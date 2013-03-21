@@ -146,7 +146,7 @@ void llvm::alf_warning(const Twine& Msg, const Instruction &I) {
 
 /// Translator Interface
 void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
-
+    this->CurrentFunction = F;
     this->ACtx = AF;
 
     // add arguments and local variables for composite-type-by-value args and composite return type
@@ -902,6 +902,7 @@ bool ALFTranslator::visitBuiltinCall(CallInst &I, Intrinsic::ID ID) {
 
 /// CallInst/inline assembler: not yet supported
 void ALFTranslator::visitInlineAsm(CallInst &CI) {
+    errs() << "[llvm2alf] In the translation of function '" << CurrentFunction->getName() << "'\n";
     alf_fatal_error("Inline assembler not supported yet",CI);
 }
 
@@ -1508,8 +1509,9 @@ std::auto_ptr<ALFConstant> ALFTranslator::foldConstant(const Constant* Const) {
 		uint64_t AbsAddress = ConstAddress->getLimitedValue();
 		const PointerType* PtrTy = cast<PointerType>(Const->getType());
 		if(PtrTy->getElementType()->isFunctionTy() || PtrTy->getElementType()->isLabelTy()) {
-			alf_warning("foldConstant: absolute addresses of functions or labels are not supported");
-			return std::auto_ptr<ALFConstant>( 0 );
+                  errs() << "[llvm2alf] In the translation of function" << CurrentFunction->getName() << "\n";
+                  alf_warning("foldConstant: absolute addresses of functions or labels are not supported");
+                  return std::auto_ptr<ALFConstant>( 0 );
 		}
 		for(mem_areas_iterator I = mem_areas_begin(), E = mem_areas_end(); I!=E; ++I) {
 			if(I->doesInclude(AbsAddress)) {

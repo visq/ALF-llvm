@@ -114,6 +114,9 @@ namespace llvm {
     /// Context for creating expression: either global or current ALF function
     ALFContext *ACtx;
 
+    /// Current Function translated, if any
+    const Function* CurrentFunction;
+
     /// State for adding statements: Current ALF Statement Group
     ALFStatementGroup *CurrentBlock;
 
@@ -187,6 +190,7 @@ namespace llvm {
 	explicit ALFTranslator(ALFBuilder &B, unsigned lau, bool FlagIgnoreVolatiles)
       : LeastAddrUnit(lau),
         Builder(B),
+        CurrentFunction(0),
         CurrentHelperBlock(0),
         IgnoreVolatiles(FlagIgnoreVolatiles),
         NextAnonValueNumber(0),
