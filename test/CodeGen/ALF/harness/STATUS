@@ -45,3 +45,13 @@ Reason: Restrictions do not take aliasing into account.
 
 Blame: Too difficult
 [sweet] Timeout
+
+Comments on Tests
+-----------------
+
+* union{1,2,3,4}
+PtrToInt and IntToPtr instructions are dropped, because those instructions are used to
+(a) implement pointer arithmetic, e.g.int2ptr (ptr2int p + offset)
+(b) implement unions, e.g. store (ptr2int p, @union), int2ptr (load @union)
+We thus cannot perform strong typechecks in the translator; they need to be carried out by SWEET.
+
