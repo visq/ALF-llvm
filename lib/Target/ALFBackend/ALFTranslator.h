@@ -196,7 +196,8 @@ namespace llvm {
         NextAnonValueNumber(0),
         TD(0), TCtx(0), TAsm(0), Mang(0)  // initialized in 'initializeTarget
 	{
-	    this->ACtx = &Builder;
+          assert(lau == 8 && "Least Addressable Unit needs to be 8-Bit for LLVM->ALF");
+          this->ACtx = &Builder;
 	}
 
 	void initializeTarget(const MCAsmInfo* _TAsm, const DataLayout* _TD, const MCRegisterInfo *_MRI) {

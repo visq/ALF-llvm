@@ -12,6 +12,8 @@
 // The ALFTranslator class is responsible for generating ALF code, and is usually
 // used by the ALFTranslator class, which traverses the input module
 //
+// FIXME: assume LAU=8 everywhere, because we want to drop int2ptr and ptr2int ops
+//
 //===----------------------------------------------------------------------===//
 
 #include "ALFTranslator.h"
@@ -1044,25 +1046,11 @@ void ALFTranslator::visitBinaryOperator(Instruction &I) {
         llvm_unreachable(0);
     }
     if(BinOpType == AddSub) {
-        /* FIXME: Supporting pointer arithmetic for LAU!=8
-         *   (a) i1 +- i2 = (add/sub i1 i2)
-         *   (b) ptrtoint[p2] - ptrtoint[p1] ==> lauToBytes[sub p2 p1]
-         *   (c) ptrtoint[p] +- i ==> add p bytesToLau[i]
-         */
-        __attribute__((unused)) bool IsPointerOperand[2] = { false, false };
-        Value *Ops[2];
-        for(int OpIx = 0; OpIx < 2; ++OpIx) {
-            Ops[OpIx] = I.getOperand(OpIx);
-            if(PtrToIntInst* SubOp = dyn_cast<PtrToIntInst>(Ops[OpIx])) {
-            	Ops[OpIx] = SubOp->getOperand(0);
-            	IsPointerOperand[OpIx] = true;
-            }
-        }
         unsigned Carry = (I.getOpcode() == Instruction::Add) ? 0 : 1;
         E = ACtx->list(Cmd)
               ->append(BitWidth)
-              ->append(buildOperand(Ops[0]))
-              ->append(buildOperand(Ops[1]))
+              ->append(buildOperand(I.getOperand(0)))
+              ->append(buildOperand(I.getOperand(1)))
               ->append(ACtx->dec_unsigned(1,Carry));
     } else if(BinOpType == Mul) {
         E = buildMultiplication(BitWidth, I.getOperand(0), I.getOperand(1));
@@ -1325,46 +1313,40 @@ void ALFTranslator::visitCastInst(CastInst &I) {
   case Instruction::FPExt:
 	E = buildFPCast(Operand, SrcTy, DstTy, false);
 	break;
-
-  // Pointers (which might be symbolic memory addresses) cannot be coerced to integers in ALF
+  // Unfortunately, LLVM is weakly typed when it comes to pointer arithmetic
+  // Consider:
+  //   store @x, ptr2int @p
+  //   @y = int2ptr (load @x)
+  // Therefore we need to let SWEET distinguish integers and pointers (for arithmetic, issuing
+  // errors if appropriate), assume LAU=8, and drop all PtrToInt and IntToPtr operations
   case Instruction::PtrToInt:
-      alf_warning("Unsupported PtrToInt instruction (emitting undefined)", I);
-      E = ACtx->undefined(getBitWidth(DstTy))
-            ->setComment("undefined ptr2int");
-	  break;
-  // This is only supported for expressions of the form (IntToPtr[ PtrToInt[p] + x ])
+    E = buildOperand(Operand);
+    break;
   case Instruction::IntToPtr:
-      if(isPtrArithCast(I)) {
-          E = buildOperand(Operand);
-      } else {
-          alf_warning("Unsupported IntToPtr instruction (emitting undefined)", I);
-          E = ACtx->undefined(getBitWidth(DstTy))
-              ->setComment("undefined int2ptr");
-      }
-      break;
+    E = buildOperand(Operand);
+    break;
   // XXX: do LLVM and ALF have the same semantics for these instructions? (tests/float2.ll)
   case Instruction::FPToUI:
   case Instruction::FPToSI:
-	  E = buildFPIntCast(Operand, SrcTy, DstTy, I.getOpcode());
-	  break;
+    E = buildFPIntCast(Operand, SrcTy, DstTy, I.getOpcode());
+    break;
   case Instruction::UIToFP:
   case Instruction::SIToFP:
-	  E = buildFPIntCast(Operand, DstTy, SrcTy, I.getOpcode());
-	  break;
+    E = buildFPIntCast(Operand, DstTy, SrcTy, I.getOpcode());
+    break;
   case Instruction::BitCast:
-    /* nop and ignore pointer <-> pointer bitcasts */
-	if(SrcTy == DstTy) {
-		E = buildOperand(Operand);
-	} else if(isPtrPtrBitCast(I)){
-		DEBUG(dbgs() << "Warning: LLVM->ALF: Ignoring ptr2ptr BitCast\n");
-		assert(TD->getTypeAllocSizeInBits(I.getType()) ==
-			   TD->getTypeAllocSizeInBits(Operand->getType()) && "bitcast between type of different size");
-		E = buildOperand(Operand);
-	} else {
-	  alf_warning("Unsupported Bitcast instruction (emitting undefined)", I);
-	  E = ACtx->undefined(getBitWidth(DstTy))->setComment("undefined bitcast");
-	}
-	break;
+    /* ignore nops and pointer <-> pointer bitcasts */
+    if(SrcTy == DstTy) {
+      E = buildOperand(Operand);
+    } else if(isPtrPtrBitCast(I)){
+      assert(TD->getTypeAllocSizeInBits(I.getType()) ==
+             TD->getTypeAllocSizeInBits(Operand->getType()) && "bitcast between type of different size");
+      E = buildOperand(Operand);
+    } else {
+      alf_warning("Unsupported Bitcast instruction (emitting undefined)", I);
+      E = ACtx->undefined(getBitWidth(DstTy))->setComment("undefined bitcast");
+    }
+    break;
   default:
       llvm_unreachable(0);
   }
@@ -1537,11 +1519,11 @@ std::auto_ptr<ALFConstant> ALFTranslator::foldConstant(const Constant* Const) {
 		switch(CE->getOpcode()) {
 		/* ptr2int (ignored, as we perform pointer arithmetic directly on pointers) */
 		case Instruction::PtrToInt:
-			return Op;
+                  return Op;
 		/* unsupported */
 		default:
-			alf_warning("Unsupported instruction in constant expression: " + valueToString(*CE));
-			return std::auto_ptr<ALFConstant>( 0 );
+                  alf_warning("Unsupported instruction in constant expression: " + valueToString(*CE));
+                  return std::auto_ptr<ALFConstant>( 0 );
 		}
 
 	} else if(CE && CE->getNumOperands() == 2) {
