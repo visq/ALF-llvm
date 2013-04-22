@@ -1,0 +1,8 @@
+Tests known to fail:
+
+* fac
+
+Blame: General
+Reason: Recursive functions not supported
+[sweet] Error during execution of command 'check-statically': The program contains recursive functions. We don't support that at present.
+
