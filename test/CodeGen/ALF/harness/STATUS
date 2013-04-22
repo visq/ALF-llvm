@@ -33,6 +33,12 @@ Reason: same as bug_top_cmp2
 [sweet] Execution of switch statement at { 93, 8 } did not result in any successor states
         (i.e., no branch was followed).
 
+* pointer6
+
+Blame: General
+Reason: Pointer arithmetic involving modolu operations is not supported by SWEET/ALF, at the moment
+[sweet] Error during execution of command 'abstract-execution': Error executing statement at (line,column) 123,8: std::bad_cast
+
 * nondet2
 
 Blame: General
