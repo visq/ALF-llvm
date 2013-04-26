@@ -38,7 +38,6 @@ for f in $TESTS ; do
         cat "${M}.log" >> error.log
     fi
 done
-echo "Comparing against [1] otap-llvm HEAD + sweet HEAD (Nov 14 2011)"
 echo "${TOTAL} tests executed (expected: ${EXPECTED_TESTS})"
 echo "${ERROR:-0} tests failed (expected: ${EXPECTED_FAILURES}) [1]"
 echo "See error.log for all error reports"

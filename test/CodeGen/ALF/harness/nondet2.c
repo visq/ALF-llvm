@@ -12,6 +12,10 @@ int tmp;
 int nondet_int() {
   return *vint_ptr;
 }
+__attribute__((noinline))
+int f(int i) {
+  return i+1;
+}
 
 int main()
 {
@@ -21,10 +25,10 @@ int main()
     {
         do
         {
-            ++i;
+            i = f(i);
             tmp = i;
         }
-        while (tmp != 10);
+        while (tmp < 10);
     }
     else
     {

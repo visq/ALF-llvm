@@ -73,8 +73,6 @@ for f in ${BENCHMARKS} ; do
         cat "${M}.log" >> error.log
     fi
 done
-echo "Comparing against [1] clang-2.9 -O0 + otap-llvm HEAD + sweet (Nov 14 2011)"
-echo
 echo "${TOTAL} tests executed (expected: ${EXPECTED_TOTAL})"
 echo "${ERROR:-0} tests failed (expected: ${EXPECTED_FAILURES} [1])"
 echo "See error.log for all error reports"
