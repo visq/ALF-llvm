@@ -34,6 +34,7 @@
 #include "llvm/Transforms/ObjCARC.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Utils/UnifyFunctionExitNodes.h"
+#include "llvm/Transforms/ALF.h"
 #include "llvm/Transforms/Vectorize.h"
 #include <cstdlib>
 
@@ -153,6 +154,8 @@ namespace {
       (void) llvm::createLoopVectorizePass();
       (void) llvm::createSLPVectorizerPass();
       (void) llvm::createBBVectorizePass();
+      (void) llvm::createALFPass();
+
       (void) llvm::createPartiallyInlineLibCallsPass();
 
       (void)new llvm::IntervalPartition();

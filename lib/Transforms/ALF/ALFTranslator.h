@@ -33,17 +33,6 @@
 
 using namespace alf;
 
-/* utility functions (local to the translation unit */
-namespace {
-
-/// Global Variables Classes and Static CTor/DTor
-enum SpecialGlobalClass {
-    NotSpecial = 0,
-    GlobalCtors, GlobalDtors, OtherMetadata
-};
-
-} // end anon namespace
-
 namespace llvm {
 
   /// Global Variables Classes and Static CTor/DTor
