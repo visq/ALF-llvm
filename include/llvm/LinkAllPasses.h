@@ -31,6 +31,7 @@
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/IPO.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/ALF.h"
 #include "llvm/Transforms/Vectorize.h"
 #include "llvm/Transforms/Utils/UnifyFunctionExitNodes.h"
 #include <cstdlib>
@@ -158,7 +159,7 @@ namespace {
       (void) llvm::createInstructionSimplifierPass();
       (void) llvm::createLoopVectorizePass();
       (void) llvm::createBBVectorizePass();
-
+      (void) llvm::createALFPass();
       (void)new llvm::IntervalPartition();
       (void)new llvm::FindUsedTypes();
       (void)new llvm::ScalarEvolution();

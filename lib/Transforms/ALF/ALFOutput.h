@@ -36,7 +36,7 @@ namespace llvm {
     class ALFOutput {
 
       private:
-          formatted_raw_ostream& Out;
+          raw_ostream& Out;
           std::vector<string> NamedListStack;
           std::vector<unsigned> LayoutStack;
 
@@ -51,10 +51,10 @@ namespace llvm {
       public:
           static const unsigned MAX_RIBBON_LENGTH = 60;
 
-          ALFOutput(formatted_raw_ostream &o,
+          ALFOutput(raw_ostream &o,
                     unsigned leastAddrUnit,
                     unsigned defaultBitWidth = 32)
-              : Out(o) {
+            : Out(o) {
               StateLayout = LAYOUT_NONE;
               Indent = 0;
               MaxIndent = 40;
@@ -73,7 +73,7 @@ namespace llvm {
               BitsOffset = bitsOffset;
           }
 
-          formatted_raw_ostream& getOutStream() {
+          raw_ostream& getOutStream() {
               return Out;
           }
 

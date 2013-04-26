@@ -58,6 +58,9 @@ void initializeCodeGen(PassRegistry&);
 /// initializeCodeGen - Initialize all passes linked into the CodeGen library.
 void initializeTarget(PassRegistry&);
 
+/// initializeALF - Initialize alf pass in the alf library
+void initializeALF(PassRegistry&);
+
 void initializeAAEvalPass(PassRegistry&);
 void initializeADCEPass(PassRegistry&);
 void initializeAliasAnalysisAnalysisGroup(PassRegistry&);
@@ -264,6 +267,7 @@ void initializeUnpackMachineBundlesPass(PassRegistry&);
 void initializeFinalizeMachineBundlesPass(PassRegistry&);
 void initializeLoopVectorizePass(PassRegistry&);
 void initializeBBVectorizePass(PassRegistry&);
+void initializeALFPassPass(PassRegistry&);
 void initializeMachineFunctionPrinterPassPass(PassRegistry&);
 }
 

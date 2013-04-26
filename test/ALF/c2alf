@@ -1,0 +1,11 @@
+#!/bin/bash
+if [ -z "${1}" ] ; then
+    echo "Usage: $0 <module>"
+    echo "  Generates <module>.ll and <module>.alf from <module>.c"
+    exit 1
+fi
+echo "Build $1.ll"
+clang -Wall -emit-llvm -S -o - $1.c | opt -mem2reg -instcombine -instsimplify -instnamer | llvm-dis -o $1.ll
+echo "Build $1.alf"
+llc $1.ll -march=alf -alf-standalone -o=$1.alf
+# rm $1.ll
