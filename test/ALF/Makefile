@@ -34,7 +34,7 @@ all:
 	$(CLANG) $(CFLAGS) -Wall -I/usr/include/i386-linux-gnu/ -emit-llvm -S -o - $^ | $(OPT) $(LLVM_OPT_FLAGS) -o $@
 
 %.ll: %.bc
-	llvm-dis -o @$ $^
+	llvm-dis -o $@ $^
 
 %.alf: %.ll
 	$(OPT) $(LLVM_OPT_FLAGS) -print-alf -alf-file=$@ $(LLVM_ALF_FLAGS) -o /dev/null $^

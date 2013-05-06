@@ -26,7 +26,7 @@ Blame: llvm2alf
 Reason: Indirect branches (a.k.a. goto label offset) are not supported by llvm2alf yet
 [llvm2alf] Error: indirect branch instruction not yet supported
 
-* pointer_undef1
+* pointer_undef1, pointer_undef2
 
 Blame: SWEET
 Reason: same as bug_top_cmp2
