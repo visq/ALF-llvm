@@ -7,6 +7,15 @@ function die()
     exit 1
 }
 
+function die_expect()
+{
+    echo "*** ${M} FAILED [expected] (${1}) - see ${M}.log" 1>&2
+#    echo "" >&2
+#    echo ">>> tail ${M}.log" >&2
+#    tail ${M}.log >&2
+    exit 1
+}
+
 function log_timeout()
 {
     if [ $1 -eq 124 ] ; then
@@ -22,6 +31,9 @@ function log_timeout()
 # AE_FLAGS ... additional flags for abstract execution
 # DOMAIN_FLAGS ... additional flags for specifing the domain
 # TIMEOUT  ... timeout
+
+SWEET=sweet
+
 function sweet_ae()
 {
     if [ "${MERGE}" == NONE ] ; then
@@ -30,7 +42,7 @@ function sweet_ae()
     if [ ! -e ${M}.alf ] ; then
         die "$M.alf does not exist"
     fi
-    (set -x; timeout ${TIMEOUT:-10} sweet -i=${M}.alf${ALF_LIBS} func=${ENTRY:-main} \
+    (set -x; timeout ${TIMEOUT:-10} ${SWEET} -i=${M}.alf${ALF_LIBS} func=${ENTRY:-main} \
         -do ${DOMAIN_FLAGS} -ae ffg=ub ${AE_FLAGS} vola=t merge=${MERGE:-all} \
         debug=trace -f lang=ff o=${M}.ff) >>$M.log 2>&1
     log_timeout $?
@@ -46,7 +58,7 @@ function sweet_check()
     if [ ! -e ${M}.alf ] ; then
         die "$M.alf does not exist"
     fi
-    sweet -i=${M}.alf func=main -c >>$M.log 2>&1 
+    ${SWEET} -i=${M}.alf func=main -c >>$M.log 2>&1 
 }
 
 

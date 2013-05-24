@@ -1,0 +1,111 @@
+{ alf
+ { macro_defs }
+ { least_addr_unit 8 }
+ big_endian
+ { exports
+  { frefs }
+  { lrefs { lref 64 "f" } { lref 64 "main" } }
+ }
+ { imports
+  { frefs }
+  { lrefs }
+ }
+ { decls }
+ { inits }
+ { funcs
+
+  /* Definition of function f */
+  { func { label 64 { lref 64 "f" } { dec_unsigned 64 0 } }
+
+   { arg_decls }
+
+   { scope
+    { decls
+     { alloc 64 "%x" 32 } /* Local Variable (PHI node) */
+     { alloc 64 "%z" 32 } /* Local Variable (PHI node) */
+    }
+
+    { inits }
+
+    { stmts
+
+     /* --------- BASIC BLOCK pred ---------- */
+     /* ------------------------------------- */
+     { label 64 { lref 64 "f::pred" } { dec_unsigned 64 0 } }
+
+      /* STATEMENT f::pred::0 */
+      /*   - %x, %z = 0, 1    */
+      /*   - br label %loop   */
+      { store { addr 64 { fref 64 "%x" } { dec_unsigned 64 0 } }
+              { addr 64 { fref 64 "%z" } { dec_unsigned 64 0 } } with
+              { dec_unsigned 32 0 }
+              { dec_unsigned 32 1 } }
+
+      { label 64 { lref 64 "f::pred::0:::1" } { dec_unsigned 64 0 } }
+      { jump { label 64 { lref 64 "f::loop" } { dec_unsigned 64 0 } } leaving 0 }
+
+     /* --------- BASIC BLOCK loop ---------- */
+     /* --------------------------------------*/
+     { label 64 { lref 64 "f::loop" } { dec_unsigned 64 0 } }
+
+      /* STATEMENT f::loop::3                          */
+      /*   - %b = icmp sgt i32 %x, %z                    */
+      /*   - br i1 %b, label %return, label %loop->%loop */
+      { switch
+       { s_gt 32 { load 32 { addr 64 { fref 64 "%x" } { dec_unsigned 64 0 } } }
+                 { load 32 { addr 64 { fref 64 "%z" } { dec_unsigned 64 0 } } } }
+       { target  { dec_signed 1 { minus 1 } }
+                 { label 64 { lref 64 "f::return" } { dec_unsigned 64 0 } } }
+       { default { label 64 { lref 64 "f::loop::3::f::loop" } { dec_unsigned 64 0 } } }
+      }
+
+      /* EDGE loop::3 -> loop */
+      /*   - %x, %z = %z, %x  */
+      /*   - br label %loop   */
+      { label 64 { lref 64 "f::loop::3::f::loop" } { dec_unsigned 64 0 } }
+      { store { addr 64 { fref 64 "%x" } { dec_unsigned 64 0 } }
+              { addr 64 { fref 64 "%z" } { dec_unsigned 64 0 } }
+              with
+              { load 32 { addr 64 { fref 64 "%z" } { dec_unsigned 64 0 } } }
+              { load 32 { addr 64 { fref 64 "%x" } { dec_unsigned 64 0 } } } }
+      { label 64 { lref 64 "f::loop::3::f::loop:::1" } { dec_unsigned 64 0 } }
+      { jump { label 64 { lref 64 "f::loop" } { dec_unsigned 64 0 } } leaving 0 }
+
+     /* --------- BASIC BLOCK return ---------- */
+     /* ----------------------------------------*/
+     { label 64 { lref 64 "f::return" } { dec_unsigned 64 0 } }
+
+      /* STATEMENT f::return::0 */
+      /*   - ret i32 0          */
+      { return { dec_unsigned 32 0 } }
+    }
+   }
+  }
+
+  /* Definition of function main */
+  { func
+   { label 64 { lref 64 "main" } { dec_unsigned 64 0 } }
+   { arg_decls }
+   { scope
+    { decls
+     { alloc 64 "%ret" 32 } /* Local Variable (Non-Inlinable Instruction) */
+    }
+    { inits }
+    { stmts
+
+     /* --------- BASIC BLOCK entry ---------- */
+      { label 64 { lref 64 "main::entry" } { dec_unsigned 64 0 } }
+
+      /* STATEMENT main::entry::0          */
+      /*   - %ret = call i32 @f() nounwind */
+      { call { label 64 { lref 64 "f" } { dec_unsigned 64 0 } } result { addr 64 { fref 64 "%ret" } { dec_unsigned 64 0 } } }
+
+      /* STATEMENT main::entry::1 */
+      /*   - ret i32 %ret */
+      { label 64 { lref 64 "main::entry::1" } { dec_unsigned 64 0 } }
+      { return { load 32 { addr 64 { fref 64 "%ret" } { dec_unsigned 64 0 } } } }
+    }
+   }
+  }
+ }
+}
