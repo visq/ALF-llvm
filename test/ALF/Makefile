@@ -5,6 +5,7 @@
 # e.g.: clang, llvm-gcc-4.2
 CLANG?=clang
 OPT?=opt
+LLC?=llc
 # e.g.: -O0, -O1
 CFLAGS?=-g
 # e.g.: -alf-ignore-volatiles
@@ -25,33 +26,39 @@ LLVM_OPT_FLAGS?=-mem2reg -instcombine -instsimplify -instnamer -early-cse
 SWEET_ENTRY?=main
 SWEET_TIMEOUT?=30
 
+VERBOSE?=0
+AT_0 := @
+AT_1 :=
+AT = $(AT_$(VERBOSE))
+
 all:
 	@echo "  ALFBackend Generic Makefile"
 	@echo "    Rules for .ll, .alf, .ff and .bin"
 	@echo "    Environment variables: CFLAGS, LLVM_OPT_FLAGS, LLVM_ALF_FLAGS"
 
 %.bc: %.c
-	$(CLANG) $(CFLAGS) -Wall -I/usr/include/i386-linux-gnu/ -emit-llvm -S -o - $^ | $(OPT) $(LLVM_OPT_FLAGS) -o $@
+	$(AT)$(CLANG) $(CFLAGS) -Wall -I/usr/include/i386-linux-gnu/ -emit-llvm -S -o - $^ | $(OPT) $(LLVM_OPT_FLAGS) -o $@
 
 %.ll: %.bc
-	llvm-dis -o $@ $^
+	$(AT)llvm-dis -o $@ $^
 
 %.alf: %.ll
-	$(OPT) $(LLVM_OPT_FLAGS) -print-alf -alf-file=$@ $(LLVM_ALF_FLAGS) -o /dev/null $^
+	$(AT)$(LLC) -march=alf $(LLVM_ALF_FLAGS) -o $@ $^
+#	$(AT)$(OPT) $(LLVM_OPT_FLAGS) -print-alf -alf-file=$@ $(LLVM_ALF_FLAGS) -o /dev/null $^
 
 %.ff:  %.alf
-	timeout $(SWEET_TIMEOUT) sweet -i=$^ func=$(SWEET_ENTRY) \
+	$(AT)timeout $(SWEET_TIMEOUT) sweet -i=$^ func=$(SWEET_ENTRY) \
 		-c -do floats=est -ae vola=t merge=none pu ffg=all -f lang=ff o=$@
 
 %.bin: %.c
-	gcc -g -DDEBUG $(CFLAGS) -o $@ -O2 $<
+	$(AT)gcc -g -DDEBUG $(CFLAGS) -o $@ -O2 $<
 %.host.s: %.ll
-	llc -o $@ $<
+	$(AT)llc -o $@ $<
 %.bin: %.host.s
-	gcc -o $@ $<
+	$(AT)gcc -o $@ $<
 %.clean:
-	rm -f $(patsubst %.clean,%.bc,$@) $(patsubst %.clean,%.*.s,$@) $(patsubst %.clean,%.*.bin,$@)  $(patsubst %.clean,%.*.ff,$@) 
+	$(AT)rm -f $(patsubst %.clean,%.bc,$@) $(patsubst %.clean,%.*.s,$@) $(patsubst %.clean,%.*.bin,$@)  $(patsubst %.clean,%.*.ff,$@) 
 
 default_clean:
-	rm -f debug_msgs.txt *.bin *.log *.ff *~ 
+	$(AT)rm -f debug_msgs.txt *.bin *.log *.ff *~ 
 .PHONY: default_clean

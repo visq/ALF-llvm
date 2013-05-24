@@ -22,8 +22,11 @@ fi
 for f in $TESTS ; do
     TOTAL=$((TOTAL+1))
     M="${f/.test/}"
-    rm -f "${M}.alf" "${M}.log"
-    make "${M}.alf" >>"${M}.log" 2>&1
+    rm -f "${M}.log"
+    if [ -e "${M}.c" -o -e "${M}.ll" ] ; then
+#        rm -f "${M}.alf"
+        make "${M}.alf"  VERBOSE=1 >>"${M}.log" 2>&1
+    fi
     BUILD_SUCCESS=$?
     if [ ${BUILD_SUCCESS} -eq 0 ] ; then
         bash "${M}.test"

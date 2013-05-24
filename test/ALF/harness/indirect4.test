@@ -1,5 +1,5 @@
 M=indirect4
 EXPECT="u[0,15]"
 source libtest
-sweet_ae || die "sweet abstract execution execution failure/timeout"
+sweet_ae || die_expect "sweet abstract execution execution failure/timeout"
 check_ret_val "${EXPECT}" || die "wrong result: ${EXPECT} /= ${RESULT}"
