@@ -28,9 +28,10 @@ ModulePass *createALFPass();
 //===----------------------------------------------------------------------===//
 //
 // Create ALF Pass - create Pass that translates LLVM bitcode to ALF,
-// writing to the specified output stream.
+// writing to the specified output stream, and using the specified
+// data layout (used by the ALF backend pass).
 //
-ModulePass *createALFPassWithStream(formatted_raw_ostream &ostream);
+ModulePass *createALFPassWithStream(formatted_raw_ostream &ostream, std::string& DataLayoutDescription);
 
 } // End llvm namespace
 

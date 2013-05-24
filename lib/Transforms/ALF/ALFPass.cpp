@@ -85,8 +85,7 @@ ALFMapFile("alf-map-file", cl::NotHidden,
 
 static cl::opt<std::string>
 ALFTargetData("alf-target-data", cl::NotHidden,
-  cl::desc("Target data string for ALF code generation (alignment and pointer properties, default HOST)"),
-  cl::init("!HOST!"));
+              cl::desc("Specify target data string for ALF code generation (alignment and pointer properties)"));
 
 static cl::opt<bool>
 ALFIgnoreVolatiles("alf-ignore-volatiles", cl::NotHidden,
@@ -117,6 +116,7 @@ namespace {
     const unsigned LeastAddrUnit;
 
     // Target Machine information
+    std::string DataLayoutDescription;
     const DataLayout* TD;
     const MCAsmInfo* TAsm;
     const MCRegisterInfo *MRI;
@@ -154,6 +154,7 @@ namespace {
     explicit ALFPass()
       : ModulePass(ID),
         LeastAddrUnit(8), /* FIXME: Currently, the translator only works with LAU=8, but LLVM has 1-bit values */
+        DataLayoutDescription(ALFTargetData),
         TD(0), TAsm(0), IL(0),
         PassOutput(0), Output(0),
         TheModule(0),  LI(0),
@@ -166,6 +167,12 @@ namespace {
     void initializeOutput(raw_ostream &os) {
       assert(! Output && "initializeOutput called, but Output != 0");
       Output = new ALFOutput(os, LeastAddrUnit);
+    }
+
+    void setDefaultDataLayout(std::string& Description) {
+      if(DataLayoutDescription.empty())
+        DataLayoutDescription = Description;
+      // if not empty, overridden by command-line argument
     }
 
     virtual const char *getPassName() const { return "ALF backend"; }
@@ -242,7 +249,7 @@ bool ALFPass::runOnModule(Module &M) {
 
   // Initialize
   TheModule = &M;
-  if(ALFTargetData == "!HOST!") {
+  if(ALFTargetData.empty()) {
 	  TD = new DataLayout(&M);
   } else {
 	  TD = new DataLayout(ALFTargetData);
@@ -577,9 +584,10 @@ ModulePass *llvm::createALFPass()
   return new ALFPass();
 }
 
-ModulePass *llvm::createALFPassWithStream(formatted_raw_ostream &ostream)
+ModulePass *llvm::createALFPassWithStream(formatted_raw_ostream &ostream, std::string& DataLayoutDescription)
 {
   ALFPass *ALF = new ALFPass();
   ALF->initializeOutput(ostream);
+  ALF->setDefaultDataLayout(DataLayoutDescription);
   return ALF;
 }

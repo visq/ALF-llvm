@@ -159,6 +159,7 @@ void ALFTranslator::translateFunction(const Function *F, ALFFunction *AF) {
     //  - PHI nodes
     //  - The condition of branch and switch statements
     //  - Stack allocated memory, if size is known at compile time
+    // Note that non-primitive types are stored as references
     unsigned ReturnInstructionCount = 0;
     for (const_inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
 
@@ -279,7 +280,7 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
                     continue;
                 SExpr* SrcPtr = ACtx->load(ACtx->getConfig()->getBitsFRef(), getValueName(I)+ARG_BYREF_SUFFIX);
                 SExpr* DstPtr = ACtx->address(getValueName(I), 0);
-                addCopyStatements(I->getType(),SrcPtr,DstPtr);
+                addStore(I->getType(), DstPtr, SrcPtr);
             }
         }
     }
@@ -295,8 +296,7 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
             // Store the value of the instruction in a temporary
             // ALF variable. Directly *after* the store, the value
             // of emitLoad(I) is equivalent to emitExpression(I)
-            SExpr *Store = ACtx->store(ACtx->address(getValueName(&*II)), buildExpression(&*II));
-            (void) addStatement(Store);
+            (void) addStore(II->getType(), ACtx->address(getValueName(&*II)), buildExpression(&*II));
         } else {
             // Visit the statement instruction II
             visit(*II);
@@ -690,11 +690,10 @@ void ALFTranslator::visitReturnInst(ReturnInst &I) {
   if(AF->isReturnByReference()) {
       // copy return values to the address passed as formal argument
       SExpr *DstExpr = ACtx->load(ACtx->getConfig()->getBitsFRef(), RETURN_VALUE_REF);
-      addCopyStatements(I.getReturnValue()->getType(), buildOperand(I.getReturnValue()), DstExpr);
+      addStore(I.getReturnValue()->getType(), DstExpr, buildOperand(I.getReturnValue()));
   } else if(AF->isMultiExit() && I.getNumOperands() != 0) {
       // store the return value before jumping to the unique exit block
-      SExpr *Store = ACtx->store(ACtx->address(RETURN_VALUE_REF),buildOperand(I.getOperand(0)));
-      addStatement(Store);
+      addStore(I.getReturnValue()->getType(), ACtx->address(RETURN_VALUE_REF),buildOperand(I.getOperand(0)));
   }
   if(AF->isMultiExit()) {
       // jump to unique exit block
@@ -770,19 +769,16 @@ void ALFTranslator::visitUnreachableInst(UnreachableInst &I) {
 /// StoreInst: store the RHS operand to the address specified by the LHS pointer operand
 ///  If the type of the stored value is not scalar, generate multiple copy statements.
 ///
-/// Note: In general, it is not safe to ignore volatile stores. A store to a regular
-///       variable might be marked volatile (to avoid reordering).
-///       For the purposes of flow analysis, we thus ignore the volatile attribute
+/// Note: In general, it is not safe to ignore volatile stores during abstract execution.
+///       For example, a store to a regular variable might be marked volatile (to avoid reordering).
+///       For the purposes of flow analysis, we thus ignore the volatile attribute, and
+///       always carry out the store operation
 void ALFTranslator::visitStoreInst(StoreInst &I) {
 
     assert(! isExpressionInst(I) && "StoreInst should be a statement, not an expression");
     SExpr *LHS = buildOperand(I.getPointerOperand());
     SExpr *RHS = buildOperand(I.getOperand(0));
-    if(isScalarValueType(I.getOperand(0)->getType())) {
-        addStatement(ACtx->store(LHS,RHS));
-    } else {
-        addCopyStatements(I.getOperand(0)->getType(), RHS, LHS);
-    }
+    addStore(I.getOperand(0)->getType(), LHS, RHS);
 }
 
 /// CallInst: Generate code for function calls, inline assembly or intrinsics.
@@ -944,8 +940,7 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
       // store true/false value
       setCurrentInstruction(Branch == 0 ? ":then" : ":else");
       SExpr *Val = buildOperand((Branch == 0) ? I.getTrueValue() : I.getFalseValue());
-      SExpr *Store = ACtx->store(ACtx->address(getValueName(&I)),Val);
-      ALFStatement* StoreStmt = addStatement(Store);
+      ALFStatement* StoreStmt = addStore(I.getTrueValue()->getType(), ACtx->address(getValueName(&I)),Val);
       addMapping(StoreStmt->getLabel(), &I);
       addStatement(ACtx->jump(JoinLabel));
   }
@@ -1184,27 +1179,29 @@ void ALFTranslator::visitGetElementPtrInst(GetElementPtrInst &GepIns) {
     setVisitorResult(GepIns, buildPointer(Ptr, Offsets));
 }
 
-/// Load a value from a frame, if it is of scalar value type.
-/// For volatile types, return a load from or a reference to
-/// a volatile frame of the right size.
-/// For non-scalar types, this is a statement instruction (not an
-/// expression instruction); it copies all values using
-/// multiple load/store pairs.
+/// Load a value from a frame (either set visitor result or copy loaded values)
 /// FIXME: alignment issues are ignored for now
 void ALFTranslator::visitLoadInst(LoadInst &I) {
-  SExpr *OpExpr = buildOperand(I.getOperand(0));
+    SExpr *OpExpr = buildOperand(I.getOperand(0));
+    bool VolatileAccess = I.isVolatile() && ! IgnoreVolatiles;
+    addLoad(I.getType(), I, ACtx->address(getValueName(&I)), OpExpr, VolatileAccess);
+}
+
+/// Load from a frame, and either set visitor result (scalar), or copy loaded values (composite)
+/// For volatile types, return a load from or a reference to a volatile frame of the right size.
+/// For non-scalar types, this is a statement instruction (not an expression instruction).
+void ALFTranslator::addLoad(Type *LoadTy, Instruction &Visitor, SExpr* LHSComposite, SExpr* RHS, bool VolatileAccess)
+{
   SExpr *Expr;
-  Type *ResultTy = I.getType();
-  bool VolatileAccess = I.isVolatile() && ! IgnoreVolatiles;
-  if(isScalarValueType(ResultTy)) {
-      Expr = loadScalar(ResultTy, OpExpr, VolatileAccess);
-      setVisitorResult(I,Expr);
+  if(isScalarValueType(LoadTy)) {
+      Expr = loadScalar(LoadTy, RHS, VolatileAccess);
+      setVisitorResult(Visitor,Expr);
   }  else {
-      addCopyStatements(ResultTy, OpExpr, ACtx->address(getValueName(&I)), VolatileAccess);
-      return;
+      addStore(LoadTy, LHSComposite, RHS, VolatileAccess);
   }
 }
 
+/// expression for loading scalar value; volatiles are loaded from a special storage location
 SExpr* ALFTranslator::loadScalar(Type *Ty, SExpr *SrcExpr, bool VolatileAccess) {
     if(VolatileAccess) {
         return ACtx->load(getBitWidth(Ty),getVolatileStorage(Ty),0);
@@ -1215,58 +1212,78 @@ SExpr* ALFTranslator::loadScalar(Type *Ty, SExpr *SrcExpr, bool VolatileAccess) 
     }
 }
 
-void ALFTranslator::addCopyStatements(Type *DstTy, SExpr *SrcExpr, SExpr *DstExpr, bool VolatileAccess,  uint64_t Offset) {
+/// Add a store statement
+ALFStatement* ALFTranslator::addStore(Type *DstTy, SExpr *LHS, SExpr *RHS, bool VolatileAccess) {
+    std::vector<SExpr*> LHSExprs, RHSExprs;
+    buildStoreExpressions(DstTy, LHS, RHS, LHSExprs, RHSExprs, VolatileAccess);
+    return addStatement(ACtx->store(LHSExprs,RHSExprs));
+}
+
+/// Compute a list of left-hand and right-hand sides to store expression RHS into frame LHS.
+/// Composite types are always represented as pointer expressions, whereas scalar types are
+/// represented in a direct way.
+void ALFTranslator::buildStoreExpressions(Type *DstTy, SExpr *DstExpr, SExpr *SrcExpr, std::vector<SExpr*> &LHS, std::vector<SExpr*> &RHS, bool VolatileAccess)
+{
+  if(isScalarValueType(DstTy)) {
+    LHS.push_back(DstExpr);
+    RHS.push_back(SrcExpr);
+  } else {
+    buildCompositeStoreExpression(DstTy, DstExpr, SrcExpr, LHS, RHS, VolatileAccess, 0);
+  }
+}
+void ALFTranslator::buildCompositeStoreExpression(Type *DstTy, SExpr *DstExpr, SExpr *SrcExpr, std::vector<SExpr*> &LHS, std::vector<SExpr*> &RHS, bool VolatileAccess, uint64_t Offset)
+{
     if(isScalarValueType(DstTy)) {
         SExpr *LoadExpr = loadScalar(DstTy, buildPointer(SrcExpr, Offset), VolatileAccess);
-        addStatement(ACtx->store(buildPointer(DstExpr, Offset), LoadExpr));
+        LHS.push_back(buildPointer(DstExpr, Offset));
+        RHS.push_back(LoadExpr);
         return;
     }
     if(StructType *STy = dyn_cast<StructType>(DstTy)) {
         unsigned Ix = 0;
         for(StructType::element_iterator I = STy->element_begin(), E = STy->element_end(); I!=E; ++I, ++Ix) {
-            addCopyStatements(*I, SrcExpr, DstExpr, VolatileAccess, Offset+getBitOffset(STy,Ix));
+          buildCompositeStoreExpression(*I, DstExpr, SrcExpr, LHS, RHS, VolatileAccess, Offset+getBitOffset(STy,Ix));
         }
     } else if(ArrayType *ArrTy = dyn_cast<ArrayType>(DstTy)) {
         for(unsigned Ix = 0; Ix < ArrTy->getNumElements(); ++Ix) {
-            addCopyStatements(ArrTy->getElementType(), SrcExpr, DstExpr, VolatileAccess, Offset+getBitOffset(ArrTy,Ix));
+            buildCompositeStoreExpression(ArrTy->getElementType(), DstExpr, SrcExpr, LHS, RHS, VolatileAccess, Offset+getBitOffset(ArrTy,Ix));
         }
     } else {
-        alf_fatal_error("Unsupported composite value type for copying");
+      alf_fatal_error("Unsupported composite value type for copying");
     }
 }
 
-/// extract value translates to a load (as we do never load composite types)
+
+/// extract value translates to a load, as composite types are always represented as framerefs
 void ALFTranslator::visitExtractValueInst(ExtractValueInst &EVI) {
-    Type *ResultTy = EVI.getType();
+    // Operand is an aggregate type
     CompositeType *AggTy = cast<CompositeType>(EVI.getAggregateOperand()->getType());
     assert(isa<CompositeType>(AggTy) && "visitExtractValueInst: expecting composite operand type");
+    Type *ResultTy = EVI.getType();
 
+    // Compute frame offset of value to extract
     int64_t BitOffset = getBitOffset(AggTy, EVI.getIndices());
     SExpr *OpExpr = buildPointer(buildOperand(EVI.getAggregateOperand()),BitOffset);
-    if(isScalarValueType(ResultTy)) {
-        SExpr *Expr = loadScalar(ResultTy, OpExpr, false);
-        setVisitorResult(EVI,Expr);
-    }  else {
-        addCopyStatements(ResultTy, OpExpr, ACtx->address(getValueName(&EVI)));
-        return;
-    }
+
+    // Scalar values can be used as expressions, composite values need to be copied
+    addLoad(ResultTy, EVI, ACtx->address(getValueName(&EVI)), OpExpr, false);
 }
 
 // insert value corresponds to copy, replacing the value of the updated element
 void ALFTranslator::visitInsertValueInst(InsertValueInst &IVI) {
+    // Results is aggregate type
     assert(isa<CompositeType>(IVI.getType()) && "visitInsertValueInst: expecting composite return type");
     CompositeType  *AggType  = cast<CompositeType>(IVI.getType());
+
     Value *OldValue = IVI.getAggregateOperand();
     Value *Update   = IVI.getInsertedValueOperand();
-    addCopyStatements(AggType, buildOperand(OldValue), ACtx->address(getValueName(&IVI)));
+
+    // Copy old value into result of the instruction
+    addStore(AggType, ACtx->address(getValueName(&IVI)), buildOperand(OldValue));
+
+    // Update member in the result
     int64_t BitOffset = getBitOffset(AggType, IVI.getIndices());
-    if(isScalarValueType(Update->getType())) {
-        SExpr *LHS = ACtx->address(getValueName(&IVI),BitOffset);
-        SExpr *RHS = buildOperand(Update);
-        addStatement(ACtx->store(LHS,RHS));
-    } else {
-        addCopyStatements(Update->getType(), buildOperand(Update), ACtx->address(getValueName(&IVI), BitOffset));
-    }
+    addStore(Update->getType(), ACtx->address(getValueName(&IVI), BitOffset), buildOperand(Update));
 }
 
 void ALFTranslator::visitExtractElementInst(ExtractElementInst &I) {
@@ -1376,18 +1393,19 @@ SExpr* ALFTranslator::buildOperand(Value *Operand) {
 }
 
 // Add unconditional jump from Block to Succ. Before that, set all PHI nodes
-// defined in the successor block
+// defined in the successor block in PARALELL
 ALFStatement* ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
     unsigned Ix = 0;
+    std::vector<SExpr*> LHS,RHS;
     for (BasicBlock::iterator I = Succ->begin(); isa<PHINode>(I); ++I, ++Ix) {
         PHINode *PN = cast<PHINode>(I);
         Value *IV = PN->getIncomingValueForBlock(Block);
         if (!isa<UndefValue>(IV)) {
-            SExpr* Code = ACtx->store(ACtx->address(getValueName(I)),buildOperand(IV));
-            Code->setComment("Assign to PHI node");
-            addStatement(Code);
+            buildStoreExpressions(IV->getType(), ACtx->address(getValueName(I)), buildOperand(IV), LHS, RHS);
         }
     }
+    if(LHS.size() > 0)
+        addStatement(ACtx->store(LHS,RHS)->setComment("Assign to PHI nodes"));
     return addStatement(ACtx->jump(getBasicBlockLabel(Succ)));
 }
 

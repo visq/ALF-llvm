@@ -187,6 +187,17 @@ public:
     SExpr* store(SExpr *Adress, SExpr *Expr) {
         return list("store")->append(Adress)->append("with")->append(Expr);
     }
+    SExpr* store(std::vector<SExpr*> Addresses, std::vector<SExpr*> Exprs) {
+        SExprList *Stmt = list("store");
+        for(std::vector<SExpr*>::iterator I = Addresses.begin(), E = Addresses.end(); I!=E; ++I) {
+            Stmt->append(*I);
+        }
+        Stmt->append("with");
+        for(std::vector<SExpr*>::iterator I = Exprs.begin(), E = Exprs.end(); I!=E; ++I) {
+            Stmt->append(*I);
+        }
+        return Stmt;
+    }
     SExpr* labelRef(const Twine& Id, unsigned Offset = 0) {
         return list("label")->append(Config->getBitsLRef())
                              ->append(lref(Twine(Id)))
