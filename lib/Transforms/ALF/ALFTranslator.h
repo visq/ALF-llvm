@@ -445,8 +445,22 @@ namespace llvm {
     /// Pointer arithmetic: add the given offset (in bits) to the translated operand
     SExpr* buildPointer(Value *Ptr, SmallVectorImpl<std::pair<Value*, int64_t> >& BitOffsets);
 
+    /// Process a load instruction (either sets visitor result or emits copy statements)
+    void addLoad(Type *LoadTy, Instruction &Visitor, SExpr* LHSComposite, SExpr* RHS, bool VolatileAccess = false);
+
     /// load a scalar value from memory
     SExpr* loadScalar(Type *Ty, SExpr *SrcExpr, bool VolatileAccess);
+
+    /// Create and add a store statement (paralell for composite values)
+    ALFStatement* addStore(Type *DstTy, SExpr *LHS, SExpr *RHS, bool VolatileAccess = false);
+
+    /// Builds store expression pairs for storing SrcExpr to DstExpr; deals correctly with composite types
+    void buildStoreExpressions(Type *DstTy, SExpr *DstExpr, SExpr *SrcExpr,
+                               std::vector<SExpr*> &LHS, std::vector<SExpr*> &RHS, bool VolatileAccess = false);
+
+    /// Builds store expression pairs for storing the composite at address SrcExpr+Offset to address DstExpr+Offset
+    void buildCompositeStoreExpression(Type *DstTy, SExpr *DstExpr, SExpr *SrcExpr,
+                                       std::vector<SExpr*> &LHS, std::vector<SExpr*> &RHS, bool VolatileAccess, uint64_t Offset);
 
     /// add copy statements (load of composite types)
     void addCopyStatements(Type *Ty, SExpr *SrcExpr, SExpr *DstExpr, bool VolatileAccess = false, uint64_t Offset = 0);
