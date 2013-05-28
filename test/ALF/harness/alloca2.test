@@ -1,0 +1,4 @@
+M=alloca2
+source libtest
+sweet_css || die_expect "sweet single-path execution failure/timeout"
+

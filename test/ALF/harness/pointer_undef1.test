@@ -1,0 +1,4 @@
+M=pointer_undef1
+source libtest
+sweet_ae || die_expect "sweet abstract execution failure/timeout"
+check_ret_val "u[0,3]" || die "wrong result: [0..3] /= ${RESULT}"

@@ -1,0 +1,20 @@
+#!/bin/bash
+if [ -z "${1}" ] ; then
+    echo "Usage: $0 <module>"
+    echo "  Generates <module>.ll and <module>.alf from <module>.c"
+    exit 1
+fi
+
+# set -x
+
+echo "Build $1.ll"
+clang -Wall -emit-llvm -S -o - $1.c | opt -mem2reg -instcombine -instsimplify -instnamer | llvm-dis -o $1.ll
+
+# echo "Build $1.alf (via backend)"
+# llc $1.ll -march=alf -alf-standalone -o=$1.alf
+
+echo "Build $1.alf (via opt pass)"
+opt $1.ll -print-alf -alf-file=$1.alf.opt -alf-standalone -o /dev/null
+
+# diff $1.alf $1.alf.opt # compare to make sure both strategies work the same way
+# rm $1.ll

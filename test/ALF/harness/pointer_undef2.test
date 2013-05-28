@@ -1,0 +1,5 @@
+M=pointer_undef2
+source libtest
+sweet_ae || die_expect "sweet single-path execution failure/timeout"
+check_ret_val "s[-128,127]" || die "wrong result: s[-128,127] /= ${RESULT}"
+

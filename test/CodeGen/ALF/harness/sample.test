@@ -1,4 +1,0 @@
-M=sample
-source libtest
-sweet_ae || die "sweet abstract execution failure/timeout"
-check_ret_val "u[0,0]" || die "wrong result: 0 /= ${RESULT}"

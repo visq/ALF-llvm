@@ -1,0 +1,63 @@
+Tests known to fail:
+
+* alloca2
+
+Blame: SWEET
+Reason: dyn_alloc not supported by SWEET
+[sweet] Unknown expression nodetype in CAlfTreeTraversor::Traverse(const AExpr* expr)!
+
+* bug_top_cmp2
+
+Blame: SWEET
+Reason: Bug #269
+[sweet] Execution of switch statement at { 54, 8 } did not result in any successor states.
+
+* indirect3, indirect4
+
+Blame: SWEET
+Reason: Indirect calls of the form (offset = [0..2] * 4; *(fptab+offs)()) are not supported by
+        SWEET. I'm not sure whether this is only due to missing congruence closure support,
+        or other issues.
+[sweet] Cannot extract (symbol, offset) pairs from value
+
+* indirect5
+
+Blame: llvm2alf
+Reason: Indirect branches (a.k.a. goto label offset) are not supported by llvm2alf yet
+[llvm2alf] Error: indirect branch instruction not yet supported
+
+* pointer_undef1, pointer_undef2
+
+Blame: SWEET
+Reason: same as bug_top_cmp2
+[sweet] Execution of switch statement at { 93, 8 } did not result in any successor states
+        (i.e., no branch was followed).
+
+* pointer6
+
+Blame: General
+Reason: Pointer arithmetic involving modolu operations is not supported by SWEET/ALF, at the moment
+[sweet] Error during execution of command 'abstract-execution': Error executing statement at (line,column) 123,8: std::bad_cast
+
+* nondet2
+
+Blame: General
+Reason: Restrictions do not take aliasing into account.
+   For example, after %z = load %x, assert (%x < 3),
+   we should have (%x < 3) (because %x = %z)
+[sweet] Timeout
+
+* sample
+
+Blame: Too difficult
+[sweet] Timeout
+
+Comments on Tests
+-----------------
+
+* union{1,2,3,4}
+PtrToInt and IntToPtr instructions are dropped, because those instructions are used to
+(a) implement pointer arithmetic, e.g.int2ptr (ptr2int p + offset)
+(b) implement unions, e.g. store (ptr2int p, @union), int2ptr (load @union)
+We thus cannot perform strong typechecks in the translator; they need to be carried out by SWEET.
+

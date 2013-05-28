@@ -1,0 +1,6 @@
+M=union3
+source libtest
+sweet_css && die "sweet single-path execution succeeded (expect failure)"
+true
+
+
