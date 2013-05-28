@@ -9,7 +9,7 @@
 
 LEVEL := ../..
 TOOLNAME := opt
-LINK_COMPONENTS := bitreader bitwriter asmparser irreader instrumentation scalaropts objcarcopts ipo vectorize alf all-targets
+LINK_COMPONENTS := bitreader bitwriter asmparser irreader instrumentation scalaropts objcarcopts ipo vectorize all-targets
 
 
 include $(LEVEL)/Makefile.common
