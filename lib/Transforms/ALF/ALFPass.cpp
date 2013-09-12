@@ -249,10 +249,10 @@ bool ALFPass::runOnModule(Module &M) {
 
   // Initialize
   TheModule = &M;
-  if(ALFTargetData.empty()) {
+  if(DataLayoutDescription.empty()) {
 	  TD = new DataLayout(&M);
   } else {
-	  TD = new DataLayout(ALFTargetData);
+	  TD = new DataLayout(DataLayoutDescription);
   }
   IL = new IntrinsicLowering(*TD);
   TAsm = new MCAsmInfo();
