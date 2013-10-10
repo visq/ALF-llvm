@@ -42,10 +42,10 @@ bool ALFTargetMachine::addPassesToEmitFile(PassManagerBase &PM,
 
   // Do not simplify CFG by default, as it is difficult to predict the translation this way
   // PM.add(createCFGSimplificationPass());   // clean up after lower invoke.
-  std::string DefaultTargetData =
-    "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-"
-    "i64:64:64-f32:32:32-f64:64:64-"
-    "v64:64:64-v128:64:128-a0:0:64-n32-S64";
+
+  // no default target data layout; use the one specified in the bitcode module
+  std::string DefaultTargetData = "";
+
   // add ALFBackend pass
   PM.add(createALFPassWithStream(o, DefaultTargetData));
   return false;
