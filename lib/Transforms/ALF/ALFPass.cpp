@@ -588,6 +588,7 @@ ModulePass *llvm::createALFPassWithStream(formatted_raw_ostream &ostream, std::s
 {
   ALFPass *ALF = new ALFPass();
   ALF->initializeOutput(ostream);
-  ALF->setDefaultDataLayout(DataLayoutDescription);
+  if(! DataLayoutDescription.empty())
+    ALF->setDefaultDataLayout(DataLayoutDescription);
   return ALF;
 }
