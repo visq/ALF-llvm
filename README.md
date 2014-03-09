@@ -18,53 +18,33 @@ __IMPORTANT NOTE__: We are currently developing against LLVM 3.1
 Getting It
 ----------
 
-This is the preferred way of obtaining `llvm-otap`.
-You need git (the version control system).
+    # clone ALF-llvm
+    git clone https://github.com/visq/ALF-llvm.git
+    pushd ALF-llvm/tools
 
-    # [./]  pull official git repo
-    git clone http://llvm.org/git/llvm.git
-    cd llvm
-
-    # [llvm/] add remote to our public repo
-    git remote add forge git://forge.vmars.tuwien.ac.at/git/otap-llvm.git
-
-    # [llvm/] add remote to our developer repo (if you are registered)
-    #   Also see https://forge.vmars.tuwien.ac.at/projects/otap-llvm
-    # Developer setup
-    #  (a) Visit https://forge.vmars.tuwien.ac.at/my/account
-    #  (b) Create a new public key
-    #  (c) Try 'ssh gitolite@forge.vmars.tuwien.ac.at'
-    #    There must NOT be a password prompt, only information on the
-    #    set of repositories you have access to
-    #
-    git remote rename forge forge-read-only
-    git remote add forge gitolite@forge.vmars.tuwien.ac.at:wcet/wcet-framework/otap-llvm.git
-
-    # [llvm/] fetch forge repository
-    git fetch forge
-
-    # [llvm/] checkout the alf branch from forge
-    git checkout remotes/forge/alf_release_31 -b alf_release_31
-
-    # [llvm/] clone clang (C/C++ frontend)
-    cd tools
+    # [ALF-llvm/tools/] clone clang (C/C++ frontend)
     git clone http://llvm.org/git/clang.git
     cd clang
 
-    # [llvm/tools/clang/] synchronize with the llvm version (currently: release 3.0)
-    git checkout remotes/origin/release_31 -b release_31
-    cd ../..
+    # [ALF-llvm/tools/clang/] synchronize with the llvm version (currently: release 3.2)
+    git checkout remotes/origin/release_32 -b release_32
+    popd
 
-_NOTE_: Currently there is no master branch in the otap-llvm repository.
-In my repository, the master branch points to the HEAD of the
-[official llvm git mirror](http://llvm.org/git/llvm.git).
 
 Building
 --------
 
-To build llvm (and clang), type
+To build llvm (and clang), either run
 
-    # [llvm/] configure and build LLVM
+    # using cmake
+    mkdir build
+    cd build
+    cmake <path-to-ALF-llvm>
+    make
+
+or
+
+    # [ALF-llvm/] configure and build LLVM
     ./configure --enable-assertions && make
 
 Setting things up
@@ -72,7 +52,7 @@ Setting things up
 
 Add the LLVM binaries to your PATH environment variable.
 
-    # [llvm/] add LLVM binaries (in ./Debug or ./Debug+Asserts) to your PATH
+    # [ALF-llvm/] add LLVM binaries (in build or ./Debug or ./Debug+Asserts) to your PATH
     export PATH=$(dirname $(find $(pwd) -wholename '*/bin/llc')):${PATH}
 
 You need to use a frontend to obtain LLVM bitcode. Here is the recommended way
