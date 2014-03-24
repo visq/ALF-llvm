@@ -17,13 +17,13 @@
 
 #include <stdint.h>
 
+#include "llvm/InstVisitor.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/DerivedTypes.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/Support/FormattedStream.h"
-#include "llvm/Support/InstVisitor.h"
 
 #include "SExpr.h"
 

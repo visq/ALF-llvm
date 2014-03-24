@@ -11,7 +11,7 @@
 
 #include <iostream>
 #include <vector>
-#include "llvm/Type.h"
+#include "llvm/IR/Type.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/SmallString.h"

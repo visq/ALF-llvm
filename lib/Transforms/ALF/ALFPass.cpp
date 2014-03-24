@@ -43,12 +43,12 @@
 
 #include <set>
 
-#include "llvm/Analysis/ConstantsScanner.h"
-#include "llvm/DataLayout.h"
 #include "llvm/Pass.h"
-#include "llvm/Function.h"
-#include "llvm/Intrinsics.h"
 #include "llvm/PassManager.h"
+#include "llvm/Analysis/ConstantsScanner.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"

@@ -15,9 +15,9 @@
 #ifndef __ALF_TRANSLATOR_H__
 #define __ALF_TRANSLATOR_H__
 
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
-#include "llvm/InlineAsm.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/CodeGen/IntrinsicLowering.h"
@@ -192,8 +192,9 @@ namespace llvm {
 	void initializeTarget(const MCAsmInfo* _TAsm, const DataLayout* _TD, const MCRegisterInfo *_MRI) {
   	  TAsm = _TAsm;
   	  TD = _TD;
-  	  TCtx = new MCContext(*TAsm, *_MRI, NULL);
-  	  Mang = new Mangler(*TCtx, *TD);
+  	  TCtx = new MCContext(TAsm, _MRI, NULL);
+          TargetMachine *TM;
+  	  Mang = new Mangler(TM);
 	}
 
 	void addMemoryArea(uint64_t Start, uint64_t End, bool IsVolatile) {
