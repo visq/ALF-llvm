@@ -25,9 +25,6 @@ class SExpr {
   /// Whether this expression may be printed inline
   bool Inline;
 
-  /// If applicable, type of the corresponding LLVM instruction
-  Type *LLVMType;
-
   /// Optional comment
   std::string Comment;
 
