@@ -15,7 +15,7 @@
 #define CTARGETMACHINE_H
 
 #include "llvm/Target/TargetMachine.h"
-#include "llvm/DataLayout.h"
+#include "llvm/IR/DataLayout.h"
 
 namespace llvm {
 

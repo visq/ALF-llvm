@@ -43,12 +43,12 @@
 
 #include <set>
 
-#include "llvm/Analysis/ConstantsScanner.h"
-#include "llvm/DataLayout.h"
 #include "llvm/Pass.h"
-#include "llvm/Function.h"
-#include "llvm/Intrinsics.h"
 #include "llvm/PassManager.h"
+#include "llvm/Analysis/ConstantsScanner.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -233,7 +233,7 @@ bool ALFPass::runOnModule(Module &M) {
   // Initialize Output, if necessary
   if(! Output) {
     std::string ErrorInfo;
-    PassOutput = new tool_output_file(ALFFile.c_str(), ErrorInfo, 0);
+    PassOutput = new tool_output_file(ALFFile.c_str(), ErrorInfo, sys::fs::F_None);
     if (!ErrorInfo.empty()) {
       delete PassOutput;
       errs() << ALF_PASS_NAME ": Opening Export File failed: " << ALFFile << "\n";
@@ -571,7 +571,7 @@ void ALFPass::lowerIntrinsics(Function &F) {
 }
 
 char ALFPass::ID = 0;
-static const char alf_pass_name[] = "ALF Translator Pass";
+//static const char alf_pass_name[] = "ALF Translator Pass";
 //INITIALIZE_PASS_BEGIN(ALFPass, ALF_PASS_NAME, alf_pass_name, false, false)
 //INITIALIZE_AG_DEPENDENCY(AliasAnalysis)
 //INITIALIZE_PASS_DEPENDENCY(LoopInfo)

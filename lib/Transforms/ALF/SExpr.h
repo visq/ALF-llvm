@@ -3,7 +3,7 @@
 
 #include <iostream>
 #include <vector>
-#include "llvm/Type.h"
+#include "llvm/IR/Type.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
 
@@ -24,9 +24,6 @@ class SExpr {
 
   /// Whether this expression may be printed inline
   bool Inline;
-
-  /// If applicable, type of the corresponding LLVM instruction
-  Type *LLVMType;
 
   /// Optional comment
   std::string Comment;

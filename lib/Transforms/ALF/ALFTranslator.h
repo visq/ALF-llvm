@@ -15,13 +15,12 @@
 #ifndef __ALF_TRANSLATOR_H__
 #define __ALF_TRANSLATOR_H__
 
-#include "llvm/Constants.h"
-#include "llvm/DataLayout.h"
-#include "llvm/InlineAsm.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
+#include "llvm/IR/InlineAsm.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/CodeGen/IntrinsicLowering.h"
-#include "llvm/Target/Mangler.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/Support/GetElementPtrTypeIterator.h"
@@ -88,6 +87,22 @@ namespace llvm {
 
   };
 
+  // Trivial 'Mangler' for global names; just does two things
+  // (1) Remove '1' prefix (flag for "do not mangle")
+  // (2) Give names to anonymous values ("__unnamed_" + unique number)
+  class ALFMangler {
+    /// AnonGlobalIDs - We need to give global values the same name every time
+    /// they are mangled.  This keeps track of the number we give to anonymous
+    /// ones.
+    DenseMap<const GlobalValue*, unsigned> AnonGlobalIDs;
+
+    /// NextAnonGlobalID - This simple counter is used to unique value names.
+    unsigned NextAnonGlobalID;
+  public:
+    ALFMangler() : NextAnonGlobalID(1) {  }
+    void getName(SmallVectorImpl<char> &OutName, const GlobalValue *GV);
+  };
+
   /// ALFTranslator - This class is used to generate ALF code for LLVM expressions and various
   /// other constructs found in the LLVM IR
   /// The visitor only deals with ALF expressions, not ALF statements.
@@ -102,6 +117,9 @@ namespace llvm {
 
     /// Context for creating expression: either global or current ALF function
     ALFContext *ACtx;
+
+    /// Mangler for global names
+    ALFMangler Mangler;
 
     /// Current Function translated, if any
     const Function* CurrentFunction;
@@ -146,9 +164,6 @@ namespace llvm {
     /// Assembler info for target
     const MCAsmInfo* TAsm;
 
-    /// Name Mangler
-    Mangler *Mang;
-
   public:
 
 	/// Name of the null-pointer frame (label)
@@ -183,7 +198,7 @@ namespace llvm {
         CurrentHelperBlock(0),
         IgnoreVolatiles(FlagIgnoreVolatiles),
         NextAnonValueNumber(0),
-        TD(0), TCtx(0), TAsm(0), Mang(0)  // initialized in 'initializeTarget
+        TD(0), TCtx(0), TAsm(0)  // initialized in 'initializeTarget
 	{
           assert(lau == 8 && "Least Addressable Unit needs to be 8-Bit for LLVM->ALF");
           this->ACtx = &Builder;
@@ -192,8 +207,7 @@ namespace llvm {
 	void initializeTarget(const MCAsmInfo* _TAsm, const DataLayout* _TD, const MCRegisterInfo *_MRI) {
   	  TAsm = _TAsm;
   	  TD = _TD;
-  	  TCtx = new MCContext(*TAsm, *_MRI, NULL);
-  	  Mang = new Mangler(*TCtx, *TD);
+  	  TCtx = new MCContext(TAsm, _MRI, NULL);
 	}
 
 	void addMemoryArea(uint64_t Start, uint64_t End, bool IsVolatile) {
@@ -208,7 +222,6 @@ namespace llvm {
     virtual ~ALFTranslator() {
         if(CurrentHelperBlock) delete CurrentHelperBlock;
     	delete TCtx;
-    	delete Mang;
     }
 
     /// should be called before writing the output

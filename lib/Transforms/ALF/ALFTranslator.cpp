@@ -17,7 +17,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "ALFTranslator.h"
-#include "llvm/IntrinsicInst.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/DebugInfo.h"
 #include "llvm/Support/CallSite.h"
 #include "llvm/Support/InstIterator.h"
@@ -32,12 +32,6 @@ namespace {
 inline bool isPtrPtrBitCast(const Instruction &I) {
   if (!isa<BitCastInst>(I)) return false;
   return (I.getOperand(0)->getType()->isPointerTy() && I.getType()->isPointerTy());
-}
-
-/// Check whether this IntToPtr cast is a pointer arithmetic
-/// expression (in this case, it is directly supported by ALF)
-inline bool isPtrArithCast(const CastInst &I) {
-    return true; /// XXX: implement
 }
 
 /// Check whether this constant expression is a pointer <-> pointer bitcast
@@ -338,11 +332,12 @@ std::string ALFTranslator::getStatementComment(const Instruction &Ins, unsigned 
 void ALFTranslator::getStatementInstructions(const Instruction& Ins, std::vector<const Instruction*> &InsList) {
     std::vector<const Instruction *> Worklist;
     Worklist.push_back(&Ins);
-    while(! Worklist.size() == 0) {
+    while (Worklist.size() > 0) {
         const Instruction *UsedIns = Worklist.back();
         Worklist.pop_back();
         InsList.push_back(UsedIns);
-        for(Instruction::const_op_iterator OI = UsedIns->op_begin(), OE = UsedIns->op_end(); OI != OE; ++OI) {
+        for(Instruction::const_op_iterator OI = UsedIns->op_begin(), OE = UsedIns->op_end();
+            OI != OE; ++OI) {
             if(Instruction* Op = dyn_cast<Instruction>(OI)) {
                 if(isa<PHINode>(Op)) continue;
                 if(! isInlinableInst(*Op)) continue;
@@ -1074,6 +1069,7 @@ void ALFTranslator::visitBinaryOperator(Instruction &I) {
               ->append(buildOperand(I.getOperand(1)));
     } else {
         assert(0 && "visitBinaryOperator: Invalid BinOpType");
+        E = 0;
     } // end if: binary op kinds
   } // end if: neg/fneg/binary
   setVisitorResult(I,E);
@@ -1165,8 +1161,7 @@ void ALFTranslator::visitGetElementPtrInst(GetElementPtrInst &GepIns) {
 	Value *Ptr = GepIns.getPointerOperand();
 	gep_type_iterator S = gep_type_begin(GepIns), E = gep_type_end(GepIns);
 
-	unsigned BitWidth =  getBitWidth(Ptr->getType());
-	assert(BitWidth == TD->getPointerSizeInBits() && "bad pointer bit width");
+        assert(getBitWidth(Ptr->getType()) == TD->getPointerSizeInBits() && "bad pointer bit width");
 
 	SmallVector<std::pair<Value*, int64_t>, 4> Offsets;
 
@@ -1838,10 +1833,11 @@ std::string ALFTranslator::getValueName(const Value *Operand) {
       Operand = V;
   }
 
-  // Mangle globals with the standard mangler interface for LLC compatibility.
+  // Global names are provided by the ALF mangler (the standard mangler
+  // is no longer available as it depends on the TargetMachine in LLVM 3.4)
   if (const GlobalValue *GV = dyn_cast<GlobalValue>(Operand)) {
     SmallString<128> Str;
-    Mang->getNameWithPrefix(Str, GV, false);
+    Mangler.getName(Str, GV);
     return Str.str().str();
   }
 
@@ -1852,6 +1848,27 @@ std::string ALFTranslator::getValueName(const Value *Operand) {
   }
   return "%"+Name;
 }
+
+void ALFMangler::getName(SmallVectorImpl<char> &OutName, const GlobalValue *GV) {
+  // If this global has a name, only remove leading \1
+  if (GV->hasName()) {
+    StringRef Name = GV->getName();
+    if (Name[0] == '\1') {
+      Name = Name.substr(1);
+    }
+    OutName.append(Name.begin(), Name.end());
+  } else {
+    // Get the ID for the global, assigning a new one if we haven't got one
+    // already.
+    unsigned &ID = AnonGlobalIDs[GV];
+    if (ID == 0) ID = NextAnonGlobalID++;
+    StringRef Prefix = "__unnamed_";
+    OutName.append(Prefix.begin(), Prefix.end());
+    std::string NameId = utostr(ID);
+    OutName.append(NameId.begin(), NameId.end());
+  }
+}
+
 
 std::string ALFTranslator::getBlockName(const BasicBlock *BB) {
  if(! BB->hasName()) {
