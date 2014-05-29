@@ -1,3 +1,21 @@
+if ! which sweet>/dev/null; then
+    echo "SWEET not found">&2
+    exit 1
+fi
+if ! which llc>/dev/null; then
+    echo "llc not found">&2
+    exit 1
+fi
+function doalarm () {
+    perl -e 'alarm shift; exec @ARGV' "$@";
+}
+
+if which timeout>/dev/null; then
+   TIMEOUT_CMD=timeout; # timeout available
+else
+   TIMEOUT_CMD=doalarm
+fi
+
 function die()
 {
     echo "*** ${M} FAILED (${1}) - see ${M}.log" 1>&2
@@ -18,7 +36,7 @@ function die_expect()
 
 function log_timeout()
 {
-    if [ $1 -eq 124 ] ; then
+    if [ \( $1 -eq 124 \) -o  \( $1 -eq 142 \)  ] ; then
         echo "Timeout after ${TIMEOUT:-10} seconds" >>$M.log 2>&1
     fi
     return ${1}
@@ -42,10 +60,16 @@ function sweet_ae()
     if [ ! -e ${M}.alf ] ; then
         die "$M.alf does not exist"
     fi
-    (set -x; timeout ${TIMEOUT:-10} ${SWEET} -i=${M}.alf${ALF_LIBS} func=${ENTRY:-main} \
-        -do ${DOMAIN_FLAGS} -ae ffg=ub ${AE_FLAGS} vola=t merge=${MERGE:-all} \
-        debug=trace -f lang=ff o=${M}.ff) >>$M.log 2>&1
-    log_timeout $?
+    if [ "${DEBUG_MODE}" == "inter" ] ; then
+	${SWEET} -i=${M}.alf${ALF_LIBS} func=${ENTRY:-main} \
+            -do ${DOMAIN_FLAGS} -ae ffg=ub ${AE_FLAGS} vola=t merge=${MERGE:-all} \
+            debug=inter -f lang=ff o=${M}.ff
+    else
+	(set -x; $TIMEOUT_CMD ${TIMEOUT:-10} ${SWEET} -i=${M}.alf${ALF_LIBS} func=${ENTRY:-main} \
+            -do ${DOMAIN_FLAGS} -ae ffg=ub ${AE_FLAGS} vola=t merge=${MERGE:-all} \
+            debug=trace -f lang=ff o=${M}.ff) >>$M.log 2>&1
+	log_timeout $?
+    fi
 }
 
 function sweet_css()

@@ -14,7 +14,7 @@ clang -Wall -emit-llvm -S -o - $1.c | opt -mem2reg -instcombine -instsimplify -i
 # llc $1.ll -march=alf -alf-standalone -o=$1.alf
 
 echo "Build $1.alf (via opt pass)"
-opt $1.ll -print-alf -alf-file=$1.alf.opt -alf-standalone -o /dev/null
+opt $1.ll -print-alf -alf-file=$1.alf -alf-standalone -o /dev/null
 
 # diff $1.alf $1.alf.opt # compare to make sure both strategies work the same way
 # rm $1.ll
