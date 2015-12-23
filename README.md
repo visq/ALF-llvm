@@ -13,7 +13,7 @@ This document explains how to
 
 Tested on OS X 10.7 and 32-bit Linux (Ubuntu 12.04)
 
-__IMPORTANT NOTE__: We are currently developing against LLVM 3.1
+__IMPORTANT NOTE__: We are currently developing against LLVM 3.4
 
 Getting It
 ----------
@@ -26,8 +26,8 @@ Getting It
     git clone http://llvm.org/git/clang.git
     cd clang
 
-    # [ALF-llvm/tools/clang/] synchronize with the llvm version (currently: release 3.2)
-    git checkout remotes/origin/release_32 -b release_32
+    # [ALF-llvm/tools/clang/] synchronize with the llvm version (currently: release 3.4)
+    git checkout remotes/origin/release_34 -b release_34
     popd
 
 
