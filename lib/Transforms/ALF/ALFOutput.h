@@ -192,15 +192,18 @@ namespace llvm {
                   Out << ' ';
               }
               Out << "/* ";
-              for(string::const_iterator i = Comment.begin(),
-                                   e = Comment.end(); i != e; ++i) {
+              bool NewLine = false;
+              for(string::const_iterator i = Comment.begin(), e = Comment.end(); i != e; ++i) {
+                  if (NewLine) Out << " * ";
+                  NewLine = false;
                   if(*i == '/') {
                       Out << "\\/";
                   } else {
                       Out << *i;
                   }
                   if(*i == '\n') {
-                      for(unsigned i = 0; i < Indent+2 && i < MaxIndent; ++i) Out << ' ';
+                      for(unsigned i = 0; i < Indent && i < MaxIndent; ++i) Out << ' ';
+                      NewLine = true;
                   }
               }
               Out << " */";

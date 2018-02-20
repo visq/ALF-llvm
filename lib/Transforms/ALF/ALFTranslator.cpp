@@ -330,7 +330,7 @@ std::string ALFTranslator::getStatementComment(const Instruction &Ins, unsigned 
     std::vector<const Instruction *> InsList;
     getStatementInstructions(Ins,InsList);
     for(std::vector<const Instruction*>::const_reverse_iterator II = InsList.rbegin(), IE = InsList.rend(); IE != II; ++ II) {
-        Comment = Comment + "\n* " + valueToString(**II);
+        Comment = Comment + "\n" + valueToString(**II);
     }
     return Comment;
 }
