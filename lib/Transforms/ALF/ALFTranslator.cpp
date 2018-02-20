@@ -301,7 +301,7 @@ void ALFTranslator::processBasicBlock(const BasicBlock *BBconst, ALFFunction *AC
 
 
 /// Add an ALF statement for the current LLVM instruction in the current statement block
-/// This function returns the label of the generated ALF Statement
+/// This function returns the generated ALF Statement
 ALFStatement* ALFTranslator::addStatement(SExpr *Code) {
     std::string StatementLabel = getInstructionLabel(CurrentInstruction->getParent(), CurrentInsIndex);
     if(CurrentHelperBlock)
@@ -309,10 +309,18 @@ ALFStatement* ALFTranslator::addStatement(SExpr *Code) {
     if(CurrentInsCounter > 0) {
         StatementLabel += ":::" + utostr(CurrentInsCounter);
     }
+    bool CurrBlockEmpty = CurrentBlock->empty();
     bool IsFirst = !CurrentHelperBlock && CurrentInsCounter == 0;
     ALFStatement *Stmt = CurrentBlock->addStatement(StatementLabel,
             IsFirst ? getStatementComment(*CurrentInstruction, CurrentInsIndex) : "", Code);
     CurrentInsCounter++;
+    // Add basic block mapping, if this is the first statement in the current ALF statement group.
+    // Otherwise, add mapping from the instruction to the corresponding ALF statement.
+    if (!CurrBlockEmpty) {
+        addMapping(StatementLabel, CurrentInstruction);
+    } else {
+        addMapping(CurrentBlock->getLabel(), CurrentInstruction);
+    }
     return Stmt;
 }
 
@@ -936,13 +944,11 @@ void ALFTranslator::visitSelectInst(SelectInst &I) {
       setCurrentInstruction(Branch == 0 ? ":then" : ":else");
       SExpr *Val = buildOperand((Branch == 0) ? I.getTrueValue() : I.getFalseValue());
       ALFStatement* StoreStmt = addStore(I.getTrueValue()->getType(), ACtx->address(getValueName(&I)),Val);
-      addMapping(StoreStmt->getLabel(), &I);
       addStatement(ACtx->jump(JoinLabel));
   }
   // join block
   setCurrentInstruction(":join");
   ALFStatement* JoinNopStmt = addStatement(ACtx->null());
-  addMapping(JoinNopStmt->getLabel(), &I);
 #endif
 }
 
@@ -1408,45 +1414,44 @@ ALFStatement* ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock*
 // Add switch statement. The phi variables are now set in an extra basic block inserted
 // between the predecessors and sucessor.
 void ALFTranslator::addSwitch(TerminatorInst& SI,
-		                   Value* Condition,
-		                   const CaseVector& Cases,
-		                   BasicBlock* DefaultCase) {
+                              Value* Condition,
+                              const CaseVector& Cases,
+                              BasicBlock* DefaultCase) {
 
-	  BasicBlock *BB = SI.getParent();
+    BasicBlock *BB = SI.getParent();
 
-	  std::set<BasicBlock*> EdgeBlocks;
-	  SExprList *Code = ACtx->list("switch")
-	                        ->append(buildOperand(Condition));
-	  for(CaseVector::const_iterator I = Cases.begin(), E = Cases.end(); I!=E; ++I) {
-	        SExprList *Target = ACtx->list("target")
-	                                ->append(buildOperand(I->first));
-		if(isa<PHINode>(I->second->begin())) {
-		  /* need to set phi variables on the edge */
-		  Target->append(ACtx->labelRef(getInstructionLabel(BB, CurrentInsIndex, getBasicBlockLabel(I->second))));
-		  EdgeBlocks.insert(I->second);
-		} else {
-		  Target->append(ACtx->labelRef(getBasicBlockLabel(I->second)));
-		}
-		Code->append(Target);
-	  }
-	  SExprList *DefBranch = ACtx->list("default");
-	  if(isa<PHINode>(DefaultCase->begin())) {
-	    /* need to set phi variables on the edge */
-	    DefBranch->append(ACtx->labelRef(getInstructionLabel(BB, CurrentInsIndex, getBasicBlockLabel(DefaultCase))));
-	    EdgeBlocks.insert(DefaultCase);
-	  } else {
-	    DefBranch->append(ACtx->labelRef(getBasicBlockLabel(DefaultCase)));
-	  }
-	  Code->append(DefBranch);
-	  addStatement(Code);
+    std::set<BasicBlock*> EdgeBlocks;
+    SExprList *Code = ACtx->list("switch")
+        ->append(buildOperand(Condition));
+    for(CaseVector::const_iterator I = Cases.begin(), E = Cases.end(); I!=E; ++I) {
+        SExprList *Target = ACtx->list("target")
+            ->append(buildOperand(I->first));
+        if(isa<PHINode>(I->second->begin())) {
+            /* need to set phi variables on the edge */
+            Target->append(ACtx->labelRef(getInstructionLabel(BB, CurrentInsIndex, getBasicBlockLabel(I->second))));
+            EdgeBlocks.insert(I->second);
+        } else {
+            Target->append(ACtx->labelRef(getBasicBlockLabel(I->second)));
+        }
+        Code->append(Target);
+    }
+    SExprList *DefBranch = ACtx->list("default");
+    if(isa<PHINode>(DefaultCase->begin())) {
+        /* need to set phi variables on the edge */
+        DefBranch->append(ACtx->labelRef(getInstructionLabel(BB, CurrentInsIndex, getBasicBlockLabel(DefaultCase))));
+        EdgeBlocks.insert(DefaultCase);
+    } else {
+        DefBranch->append(ACtx->labelRef(getBasicBlockLabel(DefaultCase)));
+    }
+    Code->append(DefBranch);
+    addStatement(Code);
 
-	  // Insert basic blocks to set phi copies (one for each succ with phi nodes)
-	  for(std::set<BasicBlock*>::const_iterator I = EdgeBlocks.begin(), E = EdgeBlocks.end(); I!=E; ++I) {
-		  BasicBlock* Succ = *I;
-		  setCurrentInstruction(getBasicBlockLabel(Succ));
-		  ALFStatement* Jump = addUnconditionalJump(BB, Succ);
-		  addMapping(Jump->getLabel(), &SI);
-	  }
+    // Insert basic blocks to set phi copies (one for each succ with phi nodes)
+    for(std::set<BasicBlock*>::const_iterator I = EdgeBlocks.begin(), E = EdgeBlocks.end(); I!=E; ++I) {
+        BasicBlock* Succ = *I;
+        setCurrentInstruction(getBasicBlockLabel(Succ));
+        ALFStatement* Jump = addUnconditionalJump(BB, Succ);
+    }
 }
 
 // Constant Expressions which could not be folded by LLVM itself
@@ -1890,12 +1895,6 @@ void ALFTranslator::setCurrentInstruction(Instruction *I, unsigned Index) {
     CurrentInstruction = I;
     CurrentInsIndex = Index;
     CurrentInsCounter = 0;
-    // Add basic block mapping, if this is the first statement in the current ALF statement group
-    if(CurrentBlock->empty()) {
-        addMapping(getBasicBlockLabel(I->getParent()), I);
-    }
-    // add mapping from the instruction to the corresponding ALF statement
-    addMapping(getInstructionLabel(I->getParent(),CurrentInsIndex), I);
 }
 
 void ALFTranslator::setCurrentInstruction(const std::string& TempBlockLabel) {
