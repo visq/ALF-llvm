@@ -324,6 +324,30 @@ ALFStatement* ALFTranslator::addStatement(SExpr *Code) {
     return Stmt;
 }
 
+/// Add a local variable with a name that doesn't collide with any visible names in the current context.
+/// The name consists of \p BaseName with a generated suffix appended. The resulting name is returned.
+std::string ALFTranslator::addTempLocal(ALFFunction *AF, const Twine &BaseName, unsigned BitWidth, const Twine &Comment) {
+    // collect all existing local and global variable names
+    std::set<std::string> AllNames;
+    for (std::vector<Frame*>::iterator F = Builder.globals_begin(), E = Builder.globals_end(); F!=E; ++F) {
+        AllNames.insert( (*F)->FrameName );
+    }
+    for (std::vector<Frame*>::iterator F = AF->args_begin(), E = AF->args_end(); F!=E; ++F) {
+        AllNames.insert( (*F)->FrameName );
+    }
+    for (std::vector<Frame*>::iterator F = AF->locals_begin(), E = AF->locals_end(); F!=E; ++F) {
+        AllNames.insert( (*F)->FrameName );
+    }
+    // add a suffix to the base name to make it unique
+    std::string Pref = BaseName.str() + '.', Name;
+    int Suffix = 0;
+    do { Name = Pref + utostr(Suffix++); }
+    while (AllNames.find(Name) != AllNames.end());
+    // create the actual frame
+    AF->addLocal(Name, BitWidth, Comment);
+    return Name;
+}
+
 /// Build a comment describing a statement
 std::string ALFTranslator::getStatementComment(const Instruction &Ins, unsigned Index) {
     std::string Comment = "STATEMENT " + getInstructionLabel(Ins.getParent(), Index);
@@ -1394,19 +1418,52 @@ SExpr* ALFTranslator::buildOperand(Value *Operand) {
 }
 
 // Add unconditional jump from Block to Succ. Before that, set all PHI nodes
-// defined in the successor block in PARALELL
+// defined in the successor block.
 ALFStatement* ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
-    unsigned Ix = 0;
-    std::vector<SExpr*> LHS,RHS;
-    for (BasicBlock::iterator I = Succ->begin(); isa<PHINode>(I); ++I, ++Ix) {
-        PHINode *PN = cast<PHINode>(I);
-        Value *IV = PN->getIncomingValueForBlock(Block);
-        if (!isa<UndefValue>(IV)) {
-            buildStoreExpressions(IV->getType(), ACtx->address(getValueName(I)), buildOperand(IV), LHS, RHS);
-        }
+    // collect the phi nodes of the successor block
+    std::vector<PHINode*> PHINodes;
+    for (BasicBlock::iterator I = Succ->begin(); isa<PHINode>(I); ++I) {
+        PHINodes.push_back(cast<PHINode>(I));
     }
-    if(LHS.size() > 0)
-        addStatement(ACtx->store(LHS,RHS)->setComment("Assign to PHI nodes"));
+
+    std::vector<SExpr*> SExprs, SExprs2;
+    std::set<Value*> LaterUses; // to collect all uses in subsequent phi nodes
+
+    // go through the phi nodes in reverse order
+    for (std::vector<PHINode*>::reverse_iterator I = PHINodes.rbegin(), E = PHINodes.rend(); I!=E; ++I) {
+        Value *IV = (*I)->getIncomingValueForBlock(Block);
+        if (!isa<UndefValue>(IV)) {
+            SExpr *Code;
+            // check if the assigned variable is used in a subsequent phi node
+            if (LaterUses.find(*I) == LaterUses.end()) {
+                // "normal" case
+                Code = ACtx->store(ACtx->address(getValueName(*I)),buildOperand(IV));
+                Code->setComment("Assign to PHI node");
+            } else {
+                // the assigned variable is used in a subsequent phi node, and thus shouldn't be updated
+                // until after that use; temporarily store its new contents in a new variable until after
+                // its old value has been used
+                unsigned BitWidth = getBitWidth((*I)->getType());
+                std::string Name = getValueName(*I);
+                std::string TmpName = addTempLocal((ALFFunction*)ACtx, Name, BitWidth, "Local variable (PHI node temporary)");
+                Code = ACtx->store(ACtx->address(TmpName), buildOperand(IV));
+                Code->setComment("Assign to PHI node");
+                // additional statement to update the variable
+                SExprs2.push_back( ACtx->store(ACtx->address(Name), ACtx->load(BitWidth, ACtx->address(TmpName))) );
+            }
+            SExprs.push_back(Code);
+        }
+        LaterUses.insert(IV);
+    }
+
+    // generate the statements
+    for (std::vector<SExpr*>::reverse_iterator I = SExprs.rbegin(), E = SExprs.rend(); I!=E; ++I) {
+        addStatement(*I);
+    }
+    for (std::vector<SExpr*>::reverse_iterator I = SExprs2.rbegin(), E = SExprs2.rend(); I!=E; ++I) {
+        addStatement(*I);
+    }
+
     return addStatement(ACtx->jump(getBasicBlockLabel(Succ)));
 }
 

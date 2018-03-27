@@ -269,6 +269,10 @@ public:
         return AF;
     }
 
+    std::vector<Frame*>::iterator globals_begin() { return GlobalFrames.begin(); }
+
+    std::vector<Frame*>::iterator globals_end() { return GlobalFrames.end(); }
+
     /// write ALF module to file
     void writeToFile(ALFOutput& O);
 

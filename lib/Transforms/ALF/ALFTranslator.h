@@ -446,6 +446,10 @@ namespace llvm {
     }
   private:
 
+    /// Add a local variable with a name that doesn't collide with any visible names in the current context.
+    /// The name consists of \p BaseName with a generated suffix appended. The resulting name is returned.
+    std::string addTempLocal(ALFFunction *AF, const Twine &BaseName, unsigned BitWidth, const Twine &Comment);
+
     /// Build a comment describing a statement
     std::string getStatementComment(const Instruction &Ins, unsigned Index);
 
