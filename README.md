@@ -93,11 +93,6 @@ Here are the relevant options:
   Target data string for ALF code generation, specifying for example
   data alignment or the size of pointers (default: `HOST`)
 
-* `-alf-map-file=<filename>`
-
-  Generate a file `filename` containing mappings from ALF code labels
-  to source code positions.
-
 ### Example Usage
 
 Here is an example of using the translator:
