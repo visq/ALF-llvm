@@ -109,16 +109,16 @@ Here is an example:
 
     sweet -i=test.alf func=main -ae ffg=ub vola=t pu css -f co
 
-There are a few simple tests in `test/CodeGen/ALF`.
+There are a few simple tests in `test/ALF`.
 The tests can be executed as follows (starting in llvm directory):
 
     # [llvm/] Add LLVM bin directory to PATH
     export PATH=$(dirname $(find $(pwd) -wholename '*/bin/llc')):${PATH}
 
     # [llvm/] test directory for ALF
-    cd test/CodeGen/ALF/harness
+    cd test/ALF/harness
 
-    # [llvm/test/CodeGen/ALF/harness] Test Harness
+    # [llvm/test/ALF/harness] Test Harness
     # Runs a set of tests and checks the expected number of failures
     # Assumes there is a 'sweet' program available
     bash run_tests
@@ -127,15 +127,15 @@ The tests can be executed as follows (starting in llvm directory):
 Note that `.ll` files contain disassembled LLVM bitcode. To get from C to bitcode,
 you need a C frontend for LLVM, such as clang or dragonegg.
 
-    # [llvm/test/CodeGen/ALF/harness] generate bitcode
+    # [llvm/test/ALF/harness] generate bitcode
     clang -Wall -emit-llvm -S -o - array.c | \
         opt -mem2reg -instcombine -instsimplify -instnamer | \
         llvm-dis -o array.ll
 
-    # [llvm/test/CodeGen/ALF/harness] generate ALF code
+    # [llvm/test/ALF/harness] generate ALF code
     llc -march=alf -o array.alf array.ll
 
-    # [llvm/test/CodeGen/ALF/harness] analyze using sweet (single path mode)
+    # [llvm/test/ALF/harness] analyze using sweet (single path mode)
     sweet -i=array.alf func=main -ae ffg=ub vola=t pu css -f co
 
 Identifier Mapping
