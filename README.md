@@ -32,8 +32,8 @@ Getting It
 
 Whenever ALF-llvm has been updated, do the following to get these updates:
 
-   # [ALF-llvm/] pull latest changes
-   git pull
+    # [ALF-llvm/] pull latest changes
+    git pull
 
 Building
 --------
