@@ -30,6 +30,10 @@ Getting It
     git checkout remotes/origin/release_34 -b release_34
     popd
 
+Whenever ALF-llvm has been updated, do the following to get these updates:
+
+   # [ALF-llvm/] pull latest changes
+   git pull
 
 Building
 --------
