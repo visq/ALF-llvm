@@ -88,6 +88,11 @@ function sweet_check()
 
 function check_ret_val()
 {
+    if [ "$#" -eq 1 ] ; then
+        EXPECTED="$1"
+    else
+        EXPECTED="[$1..$2]"
+    fi
     RESULT=$(tail -n 1 debug_msgs.txt)
-    [[ "${RESULT}" =~ "${1}" ]]
+    [[ "${RESULT}" =~ ".	[0] ${EXPECTED} (" ]]
 }

@@ -124,7 +124,6 @@ void ALFBuilder::writeFunction(ALFFunction* AF, ALFOutput& Output) {
 void ALFBuilder::writeStatementGroup(ALFFunction* AF, ALFOutput& Output, ALFStatementGroup *Group) {
     Output.newline();
     Output.comment("--------- BASIC BLOCK " + Group->getComment() + " ----------",false);
-    Output.incrementIndent();
     unsigned Ix = 0;
     for(std::vector<ALFStatement*>::iterator I = Group->stmts_begin(), E = Group->stmts_end(); I!=E; ++I, ++Ix) {
         if(Ix == 0) {
@@ -138,7 +137,6 @@ void ALFBuilder::writeStatementGroup(ALFFunction* AF, ALFOutput& Output, ALFStat
         }
         Output.sexpr((*I)->getCode());
     }
-    Output.decrementIndent();
 }
 
 void ALFBuilder::writeMapFile(const std::string& FileName) {

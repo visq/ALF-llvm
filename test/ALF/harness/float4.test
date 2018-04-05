@@ -3,4 +3,4 @@ DOMAIN_FLAGS="floats=est"
 TIMEOUT=30
 source libtest
 sweet_css || die "sweet single-path execution failure/timeout"
-check_ret_val "u[0,0]" || die "wrong result: [0,0] /= ${RESULT}"
+check_ret_val 0 || die "wrong result: ${EXPECTED} /= ${RESULT}"
