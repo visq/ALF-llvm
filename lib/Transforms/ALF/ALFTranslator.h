@@ -363,7 +363,7 @@ namespace llvm {
     bool isInlinableInst(const Instruction &I);
 
     /// Add statements for an unconditional jump
-    ALFStatement* addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ);
+    void addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ);
 
     /// Add statements for a conditional branch or switch instruction
     void addSwitch(TerminatorInst& SI, Value* Condition, const CaseVector& Cases, BasicBlock* DefaultCase);
@@ -445,6 +445,10 @@ namespace llvm {
       return bits / LeastAddrUnit;
     }
   private:
+
+    /// Add a local variable with a name that doesn't collide with any visible names in the current context.
+    /// The name consists of \p BaseName with a generated suffix appended. The resulting name is returned.
+    std::string addTempLocal(ALFFunction *AF, const Twine &BaseName, unsigned BitWidth, const Twine &Comment);
 
     /// Build a comment describing a statement
     std::string getStatementComment(const Instruction &Ins, unsigned Index);
