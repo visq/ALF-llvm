@@ -1419,7 +1419,7 @@ SExpr* ALFTranslator::buildOperand(Value *Operand) {
 
 // Add unconditional jump from Block to Succ. Before that, set all PHI nodes
 // defined in the successor block.
-ALFStatement* ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
+void ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ) {
     // collect the phi nodes of the successor block
     std::vector<PHINode*> PHINodes;
     for (BasicBlock::iterator I = Succ->begin(); isa<PHINode>(I); ++I) {
@@ -1464,7 +1464,11 @@ ALFStatement* ALFTranslator::addUnconditionalJump(BasicBlock* Block, BasicBlock*
         addStatement(*I);
     }
 
-    return addStatement(ACtx->jump(getBasicBlockLabel(Succ)));
+    // add the jump statement only if the jump target is not the textual successor of the current basic block
+    // (or if no instructions have been generated yet for the current basic block, just to be sure in case the
+    // basic block is referenced from somewhere)
+    if (Succ != Block->getNextNode() || CurrentBlock->empty())
+        addStatement(ACtx->jump(getBasicBlockLabel(Succ)));
 }
 
 
@@ -1507,7 +1511,7 @@ void ALFTranslator::addSwitch(TerminatorInst& SI,
     for(std::set<BasicBlock*>::const_iterator I = EdgeBlocks.begin(), E = EdgeBlocks.end(); I!=E; ++I) {
         BasicBlock* Succ = *I;
         setCurrentInstruction(getBasicBlockLabel(Succ));
-        ALFStatement* Jump = addUnconditionalJump(BB, Succ);
+        addUnconditionalJump(BB, Succ);
     }
 }
 

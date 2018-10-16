@@ -363,7 +363,7 @@ namespace llvm {
     bool isInlinableInst(const Instruction &I);
 
     /// Add statements for an unconditional jump
-    ALFStatement* addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ);
+    void addUnconditionalJump(BasicBlock* Block, BasicBlock* Succ);
 
     /// Add statements for a conditional branch or switch instruction
     void addSwitch(TerminatorInst& SI, Value* Condition, const CaseVector& Cases, BasicBlock* DefaultCase);
