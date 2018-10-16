@@ -94,5 +94,5 @@ function check_ret_val()
         EXPECTED="[$1..$2]"
     fi
     RESULT=$(tail -n 1 debug_msgs.txt)
-    [[ "${RESULT}" =~ ".	[0] ${EXPECTED} (" ]]
+    [[ "${RESULT}" =~ ".	${EXPECTED} (" ]]
 }
